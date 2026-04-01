@@ -88,6 +88,7 @@ print(DeltaInverse(test_coords))
 def DeltaForward(angles):
     """
     Calcule la cinématique directe pour un robot Delta.
+    Fonctionne complètement vectorisé avec les arrays numpy.
     
     Paramètres:
     -----------
@@ -99,60 +100,36 @@ def DeltaForward(angles):
     array numpy de shape (n, 3)
         Chaque ligne contient les coordonnées [x, y, z] de la plateforme
     """
-    # Convertir en array numpy si nécessaire
     np_angles = np.atleast_2d(np.array(angles, dtype=float))
-    
-    # Vérifier la forme
-    if np_angles.ndim != 2 or np_angles.shape[1] != 3:
-        raise ValueError("Les angles doivent être de shape (n, 3)")
-    
-    # Paramètres du robot
-    rP = 40              
-    rB = 200              
-    wP = rP/2               
-    wB = rB/2               
-    sP = rP*3/np.sqrt(3)       
-    sB = rB*3/np.sqrt(3)       
-    L = 200                 
-    l = 430                 
-    
-    # Convertir les angles en radians
+    rP = 40              # Rayon de la plateforme (distance du centre à un point d'attache)
+    rB = 200              # Rayon du cercle sur lequel sont les moteurs
+    wP = rP/2               # Rayon de la base du triangle équilatéral formé par les points d'attache sur la plateforme
+    wB = rB/2               # Rayon de la base du triangle équilatéral formé par les moteurs
+    sP = rP*3/sqrt(3)       # Rayon du cercle sur lequel sont les points d'attache sur la plateforme
+    sB = rB*3/sqrt(3)       # Rayon du cercle sur lequel sont les moteurs
+    L = 200                 # Longueur des bras moteurs
+    l = 430                 # Longueur des bras parallèles (entre les points d'attache sur la plateforme et les extrémités des bras moteurs)
     t1_rad = np.radians(np_angles[:, 0])
     t2_rad = np.radians(np_angles[:, 1])
     t3_rad = np.radians(np_angles[:, 2])
     
-    # Calculer les positions A1, A2, A3 (shape: (n, 3))
-    A1 = np.column_stack([
-        np.zeros_like(t1_rad),
-        -wB - L*np.cos(t1_rad) + rP,
-        -L*np.sin(t1_rad)
-    ])
+    A1 = np.column_stack((np.zeros_like(t1_rad), -wB - L*np.cos(t1_rad)+rP, -L*np.sin(t1_rad)))
+    A2 = np.column_stack(((np.sqrt(3)/2)*(wB + L*np.cos(t2_rad))-sP/2, (1/2)*(wB + L*np.cos(t2_rad))-wP, -L*np.sin(t2_rad)))
+    A3 = np.column_stack((-(np.sqrt(3)/2)*(wB + L*np.cos(t3_rad))+sP/2, (1/2)*(wB + L*np.cos(t3_rad))-wP, -L*np.sin(t3_rad)))
     
-    A2 = np.column_stack([
-        (np.sqrt(3)/2)*(wB + L*np.cos(t2_rad)) - sP/2,
-        (1/2)*(wB + L*np.cos(t2_rad)) - wP,
-        -L*np.sin(t2_rad)
-    ])
+    a11 = 2*(A3[:,0] - A1[:,0])
+    a12 = 2*(A3[:,1] - A1[:,1])
+    a13 = 2*(A3[:,2] - A1[:,2])
+    a21 = 2*(A3[:,0] - A2[:,0])
+    a22 = 2*(A3[:,1] - A2[:,1])
+    a23 = 2*(A3[:,2] - A2[:,2])
     
-    A3 = np.column_stack([
-        -(np.sqrt(3)/2)*(wB + L*np.cos(t3_rad)) + sP/2,
-        (1/2)*(wB + L*np.cos(t3_rad)) - wP,
-        -L*np.sin(t3_rad)
-    ])
+    b1 = l**2 - l**2 - A1[:,0]**2 - A1[:,1]**2 - A1[:,2]**2 + A3[:,0]**2 + A3[:,1]**2 + A3[:,2]**2
+    b2 = l**2 - l**2 - A2[:,0]**2 - A2[:,1]**2 - A2[:,2]**2 + A3[:,0]**2 + A3[:,1]**2 + A3[:,2]**2
     
-    # Calcul des coefficients (vectorisés)
-    a11 = 2*(A3[:, 0] - A1[:, 0])
-    a12 = 2*(A3[:, 1] - A1[:, 1])
-    a13 = 2*(A3[:, 2] - A1[:, 2])
-    a21 = 2*(A3[:, 0] - A2[:, 0])
-    a22 = 2*(A3[:, 1] - A2[:, 1])
-    a23 = 2*(A3[:, 2] - A2[:, 2])
-    
-    b1 = l**2 - l**2 - A1[:, 0]**2 - A1[:, 1]**2 - A1[:, 2]**2 + A3[:, 0]**2 + A3[:, 1]**2 + A3[:, 2]**2
-    b2 = l**2 - l**2 - A2[:, 0]**2 - A2[:, 1]**2 - A2[:, 2]**2 + A3[:, 0]**2 + A3[:, 1]**2 + A3[:, 2]**2
-    
-    # Cas singulier (a13 ou a23 proche de zéro)
+    # Créer des masques pour cas singulier et normal
     singular_mask = (np.abs(a13) < 1e-10) | (np.abs(a23) < 1e-10)
+    normal_mask = ~singular_mask
     
     n = len(np_angles)
     x = np.zeros(n)
@@ -165,21 +142,25 @@ def DeltaForward(angles):
         
         aS = a11[idx]
         bS = a12[idx]
-        cS = l**2 - l**2 - A1[idx, 0]**2 - A1[idx, 1]**2 + A3[idx, 0]**2 + A3[idx, 1]**2
+        cS = l**2 - l**2 - A1[idx,0]**2 - A1[idx,1]**2 + A3[idx,0]**2 + A3[idx,1]**2
         dS = a21[idx]
         eS = a22[idx]
-        fS = l**2 - l**2 - A2[idx, 0]**2 - A2[idx, 1]**2 + A3[idx, 0]**2 + A3[idx, 1]**2
+        fS = l**2 - l**2 - A2[idx,0]**2 - A2[idx,1]**2 + A3[idx,0]**2 + A3[idx,1]**2
         
         x[idx] = (cS*eS - fS*bS) / (aS*eS - dS*bS)
         y[idx] = (aS*fS - dS*cS) / (aS*eS - dS*bS)
         
-        B = -2*A1[idx, 2]
-        C = A1[idx, 2]**2 - l**2 + (x[idx]-A1[idx, 0])**2 + (y[idx]-A1[idx, 1])**2
+        B = -2*A1[idx,2]
+        C = A1[idx,2]**2 - l**2 + (x[idx]-A1[idx,0])**2 + (y[idx]-A1[idx,1])**2
+        zplus = (-B + np.sqrt(B**2 - 4*C)) / 2
         zminus = (-B - np.sqrt(B**2 - 4*C)) / 2
-        z[idx] = zminus
+        
+        # Choisir zplus si négatif, sinon zminus
+        mask_zplus = zplus < 0
+        z[idx[mask_zplus]] = zplus[mask_zplus]
+        z[idx[~mask_zplus]] = zminus[~mask_zplus]
     
     # Traiter cas normal
-    normal_mask = ~singular_mask
     if np.any(normal_mask):
         idx = np.where(normal_mask)[0]
         
@@ -192,27 +173,38 @@ def DeltaForward(angles):
         a7 = (b2[idx] - a21[idx]*a5)/a23[idx]
         
         aa = a4**2 + 1 + a6**2
-        bb = 2*a4*(a5 - A1[idx, 0]) - 2*A1[idx, 1] + 2*a6*(a7 - A1[idx, 2])
-        cc = a5*(a5 - 2*A1[idx, 0]) + a7*(a7 - 2*A1[idx, 2]) + A1[idx, 0]**2 + A1[idx, 1]**2 + A1[idx, 2]**2 - l**2
+        bb = 2*a4*(a5 - A1[idx,0]) - 2*A1[idx,1] + 2*a6*(a7 - A1[idx,2])
+        cc = a5*(a5 - 2*A1[idx,0]) + a7*(a7 - 2*A1[idx,2]) + A1[idx,0]**2 + A1[idx,1]**2 + A1[idx,2]**2 - l**2
         
+        yplus = (-bb + np.sqrt(bb**2 - 4*aa*cc)) / (2*aa)
         yminus = (-bb - np.sqrt(bb**2 - 4*aa*cc)) / (2*aa)
+        xplus = a4*yplus + a5
+        zplus = a6*yplus + a7
         xminus = a4*yminus + a5
         zminus = a6*yminus + a7
         
-        x[idx] = xminus
-        y[idx] = yminus
-        z[idx] = zminus
+        # Choisir la solution avec z négatif (plateforme en dessous des moteurs)
+        mask_zplus = zplus < 0
+        x[idx[mask_zplus]] = xplus[mask_zplus]
+        y[idx[mask_zplus]] = yplus[mask_zplus]
+        z[idx[mask_zplus]] = zplus[mask_zplus]
+        
+        x[idx[~mask_zplus]] = xminus[~mask_zplus]
+        y[idx[~mask_zplus]] = yminus[~mask_zplus]
+        z[idx[~mask_zplus]] = zminus[~mask_zplus]
     
     return np.column_stack((x, y, z))
 
-# Exemple d'utilisation
-print("\nForward (single point):", DeltaForward([[0, 0, 0]]))
+
+# Exemple d'utilisation avec un array unique
+print("Forward (single angles):", DeltaForward([[78.5, -61.8, 57.4]]))
+print("Forward (single angles):", DeltaForward([[-13.5, -13.5, -13.5]]))
 
 # Exemple d'utilisation avec plusieurs points
 test_angles = np.array([
-    [0, 0, 0],
+    [78.5, -61.8, 57.4],
     [-13.5, -13.5, -13.5],
-    [78.5, -61.8, 57.4]
+    [0, 0, 0]
 ])
-print("Forward (multiple points):")
+print("\nForward (multiple angles):")
 print(DeltaForward(test_angles))
