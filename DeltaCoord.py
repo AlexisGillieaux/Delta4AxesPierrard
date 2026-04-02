@@ -19,7 +19,7 @@ def solve_one_arm(xr, yr, z, wB, rP, L, l):
     disc = E**2 + F**2 - G**2
     
     # Vérifier que le discriminant est positif
-    if np.any(disc < 0):
+    if np.any(disc < 0): #pas raise de value error mais changer les valeurs dans l'output
         raise ValueError("Coordonnées hors de la zone de travail - discriminant négatif")
     
     t_minus = (-F - np.sqrt(disc)) / (G - E)
@@ -208,3 +208,5 @@ test_angles = np.array([
 ])
 print("\nForward (multiple angles):")
 print(DeltaForward(test_angles))
+print("\nInverse(Forward(test_angles)):")
+print(DeltaInverse(DeltaForward(test_angles)))
