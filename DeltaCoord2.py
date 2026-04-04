@@ -222,12 +222,14 @@ def visualisation(position=None, angles=None, ax=None, show_plot=True):
     # Calculer angles et position
     if position is not None:
         angles_calc = delta_calcInverse(f, e, rf, re, [position])
+        print(f"Angles calculés pour position {position}: θ1={angles_calc[0,0]:.2f}°, θ2={angles_calc[0,1]:.2f}°, θ3={angles_calc[0,2]:.2f}°")
         if np.isnan(angles_calc[0, 0]):
             print("Position hors de portée du robot")
             return
         angles = angles_calc[0]
     elif angles is not None:
         position_calc = delta_calcForward(f, e, rf, re, [angles])
+        print(f"Position calculée pour angles {angles}: x={position_calc[0,0]:.2f} mm, y={position_calc[0,1]:.2f} mm, z={position_calc[0,2]:.2f} mm")
         if np.isnan(position_calc[0, 0]):
             print("Angles invalides")
             return
@@ -262,18 +264,18 @@ def visualisation(position=None, angles=None, ax=None, show_plot=True):
 
     t = (f - e) * tan(np.radians(30)) / 2.0
 
-    y1 = rf*np.cos(theta1_rad)
-    z1 = -rf*np.sin(theta1_rad)
+    y1 = rf*np.cos(-theta1_rad)
+    z1 = -rf*np.sin(-theta1_rad)
     arm1_end = (0, f + y1, z1)  # Bras 1
 
-    y2 =  -rf*np.cos(theta2_rad) * sin(np.radians(30))
+    y2 =  -rf*np.cos(-theta2_rad) * sin(np.radians(30))
     x2 = y2 * tan(np.radians(60))
-    z2 = -rf*np.sin(theta2_rad)
+    z2 = -rf*np.sin(-theta2_rad)
     arm2_end = (x2 + f*np.sin(np.radians(-120)), y2 + f*np.cos(np.radians(-120)), z2)  # Bras 2
 
-    y3 =  -rf*np.cos(theta3_rad) * sin(np.radians(30))
+    y3 =  -rf*np.cos(-theta3_rad) * sin(np.radians(30))
     x3 = -y3 * tan(np.radians(60))
-    z3 = -rf*np.sin(theta3_rad)
+    z3 = -rf*np.sin(-theta3_rad)
     arm3_end = (x3 + f*np.sin(np.radians(120)), y3 + f*np.cos(np.radians(120)), z3)  # Bras 3
 
     # Positions des points d'attache sur la plateforme outil
@@ -419,7 +421,7 @@ if __name__ == "__main__":
 
     print("\n=== Test visualisation ===")
     # Test de la visualisation avec des angles
-    visualisation(position=[10, 20, -250])
+    visualisation(angles=[2.64, 1.28, -56.71])
 
     print("\n=== Exemples d'utilisation de la visualisation ===")
     print("Pour visualiser avec des angles moteurs:")

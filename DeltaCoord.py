@@ -289,12 +289,14 @@ def visualisation(position=None, angles=None, ax=None, show_plot=True):
     # Calculer angles et position
     if position is not None:
         angles_calc = DeltaInverse([position])[0]
+        print(f"Angles calculés pour position {position}: θ1={angles_calc[0]:.2f}°, θ2={angles_calc[1]:.2f}°, θ3={angles_calc[2]:.2f}°")
         if np.isnan(angles_calc[0]):
             print("Position hors de portée du robot")
             return
         angles = angles_calc
     elif angles is not None:
         position_calc = DeltaForward([angles])[0]
+        print(f"Position calculée pour angles {angles}: x={position_calc[0]:.2f} mm, y={position_calc[1]:.2f} mm, z={position_calc[2]:.2f} mm")
         if np.isnan(position_calc[0]):
             print("Angles invalides")
             return
@@ -324,13 +326,13 @@ def visualisation(position=None, angles=None, ax=None, show_plot=True):
     base3 = (0,-rB,0)
 
     # Positions des extrémités des bras moteurs
-    arm1_end = (0, wB + L*np.cos(np.radians(theta1)), -L*np.sin(np.radians(theta1)))
-    arm2_end = (-(np.sqrt(3)/2)*(wB + L*np.cos(np.radians(theta2))),
-                -(1/2)*(wB + L*np.cos(np.radians(theta2))),
-                -L*np.sin(np.radians(theta2)))
-    arm3_end = ((np.sqrt(3)/2)*(wB + L*np.cos(np.radians(theta3))),
-                -(1/2)*(wB + L*np.cos(np.radians(theta3))),
-                -L*np.sin(np.radians(theta3)))
+    arm1_end = (0, wB + L*np.cos(np.radians(-theta1)), -L*np.sin(np.radians(-theta1)))
+    arm2_end = (-(np.sqrt(3)/2)*(wB + L*np.cos(np.radians(-theta2))),
+                -(1/2)*(wB + L*np.cos(np.radians(-theta2))),
+                -L*np.sin(np.radians(-theta2)))
+    arm3_end = ((np.sqrt(3)/2)*(wB + L*np.cos(np.radians(-theta3))),
+                -(1/2)*(wB + L*np.cos(np.radians(-theta3))),
+                -L*np.sin(np.radians(-theta3)))
 
     # Positions des points d'attache sur la plateforme outil
     platform1 = (x0, y0 + rP, z0)
@@ -413,4 +415,4 @@ def visualisation(position=None, angles=None, ax=None, show_plot=True):
 
     return fig, ax
 test_forward_inverse()
-# visualisation(angles=[0,0,0])
+visualisation(position=[200,-120,-350])
