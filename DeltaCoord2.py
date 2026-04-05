@@ -357,10 +357,8 @@ def visualisation(position=None, angles=None, ax=None, show_plot=True):
     if show_plot:
         plt.show()
 
-
-# --- Tests ---
-if __name__ == "__main__":
-    # Dimensions du robot (valeurs par défaut du site)
+def tests():
+ # Dimensions du robot (valeurs par défaut du site)
     e  = 40.0   # rayon end effector
     f  = 200.0   # rayon base
     re = 430.0   # longueur avant-bras
@@ -434,3 +432,4 @@ if __name__ == "__main__":
     print()
     print("Pour la position par défaut:")
     print("visualisation()")
+# --- Tests ---

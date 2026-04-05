@@ -75,21 +75,6 @@ def DeltaInverse(coordinates):
         # Retourner un array de shape (n, 3)
         return np.column_stack((t1, t2, t3))
 
-# Exemple d'utilisation avec un array unique
-print("Inverse (single point):", DeltaInverse([[250, 250, -200]]))
-print("Inverse (single point):", DeltaInverse([[0, 0, -300]]))
-
-# Exemple d'utilisation avec plusieurs points
-test_coords = np.array([
-    [250, 250, -200],
-    [0, 0, -300],
-    [0, 0, -342.5],
-    [2500,2500,-2500],
-    [50,50,0]
-])
-print("\nInverse (multiple points):")
-print(DeltaInverse(test_coords))
-print("Inverse (erreur format):", DeltaInverse([[0, 0]]))
 
 def DeltaForward(angles):
     """
@@ -414,5 +399,5 @@ def visualisation(position=None, angles=None, ax=None, show_plot=True):
     print(f"Angles des moteurs: θ1={theta1:.2f}°, θ2={theta2:.2f}°, θ3={theta3:.2f}°")
 
     return fig, ax
-test_forward_inverse()
-visualisation(position=[200,-120,-350])
+# test_forward_inverse()
+# visualisation(position=[200,-120,-350])

@@ -1,84 +1,16 @@
-# Robot Delta - Cinématique et Visualisation
+# Robot Delta - Cinématique, Trajectoires et Visualisation
 
-Ce projet contient l'implémentation des algorithmes de cinématique directe et inverse pour un robot Delta, ainsi qu'une fonction de visualisation 3D.
+Ce projet implémente les algorithmes de cinématique directe/inverse pour un robot Delta et générant des trajectoires articulaires synchronisées avec profils trapézoïdaux.
 
-## Fichiers
+## Structure du projet
 
-- `DeltaCoord.py` : Implémentation originale avec numpy (version optimisée)
-- `DeltaCoord2.py` : Implémentation adaptée avec numpy et visualisation
-- `requirements.txt` : Dépendances Python
-- `test_visualisation.py` : Exemples d'utilisation de la visualisation
-
-## Fonctions disponibles (DeltaCoord2.py)
-
-### Cinématique Inverse
-```python
-delta_calcInverse(f, e, rf, re, coordinates)
 ```
-- **Paramètres**:
-  - `f` : rayon de la base (100.0 mm)
-  - `e` : rayon de la plateforme (40.0 mm)
-  - `rf` : longueur des bras moteurs (200.0 mm)
-  - `re` : longueur des connecteurs (430.0 mm)
-  - `coordinates` : array numpy de shape (n, 3) avec les coordonnées [x, y, z]
-- **Retour** : array numpy de shape (n, 3) avec les angles [theta1, theta2, theta3] en degrés
-
-### Cinématique Directe
-```python
-delta_calcForward(f, e, rf, re, angles)
-```
-- **Paramètres**:
-  - `f, e, rf, re` : mêmes paramètres que ci-dessus
-  - `angles` : array numpy de shape (n, 3) avec les angles [theta1, theta2, theta3] en degrés
-- **Retour** : array numpy de shape (n, 3) avec les coordonnées [x, y, z]
-
-### Visualisation 3D
-```python
-visualisation(position=None, angles=None, ax=None, show_plot=True)
-```
-- **Paramètres**:
-  - `position` : coordonnées [x, y, z] de l'effecteur (calcule les angles automatiquement)
-  - `angles` : angles [theta1, theta2, theta3] des moteurs (calcule la position automatiquement)
-  - `ax` : axes matplotlib pour intégration dans des subplots
-  - `show_plot` : afficher la figure (défaut: True)
-
-## Exemples d'utilisation
-
-### Calcul d'angles à partir d'une position
-```python
-import numpy as np
-from DeltaCoord2 import delta_calcInverse
-
-# Paramètres du robot
-f, e, rf, re = 100.0, 40.0, 200.0, 430.0
-
-# Position cible
-position = np.array([[250, 250, -200]])
-angles = delta_calcInverse(f, e, rf, re, position)
-print(f"Angles: {angles[0]}")  # [65.8°, -55.1°, 43.6°]
-```
-
-### Calcul de position à partir d'angles
-```python
-from DeltaCoord2 import delta_calcForward
-
-angles = np.array([[78.5, -61.8, 57.4]])
-position = delta_calcForward(f, e, rf, re, angles)
-print(f"Position: {position[0]}")  # [261.6, 281.1, -150.9]
-```
-
-### Visualisation
-```python
-from DeltaCoord2 import visualisation
-
-# Visualiser avec des angles
-visualisation(angles=[78.5, -61.8, 57.4])
-
-# Visualiser avec une position
-visualisation(position=[250, 250, -200])
-
-# Visualisation par défaut
-visualisation()
+.
+├── DeltaCoord.py              # Cinématique (implémentation optimisée)
+├── DeltaCoord2.py             # Cinématique alternative avec visualisation
+├── trajectoires.py            # Génération et visualisation de trajectoires
+├── requirements.txt           # Dépendances Python
+└── README.md                  # Documentation
 ```
 
 ## Installation
@@ -87,16 +19,211 @@ visualisation()
 pip install -r requirements.txt
 ```
 
-## Paramètres du robot
+---
 
-- `e = 40.0` : Rayon de la plateforme (distance centre → point d'attache)
-- `f = 100.0` : Rayon de la base (distance centre → moteur)
-- `re = 430.0` : Longueur des bras parallèles (connecteurs)
-- `rf = 200.0` : Longueur des bras moteurs (biceps)
+## 1. Cinématique (DeltaCoord.py)
+
+### Fonctions disponibles
+
+#### Cinématique Inverse
+```python
+from DeltaCoord import DeltaInverse
+
+angles = DeltaInverse([[0, 0, -300]])
+# Retourne: array de shape (1, 3) avec [theta1, theta2, theta3]
+```
+
+#### Cinématique Directe
+```python
+from DeltaCoord import DeltaForward
+
+position = DeltaForward([[78.5, -61.8, 57.4]])
+# Retourne: array de shape (1, 3) avec [x, y, z]
+```
+
+### Paramètres du robot Delta
+
+| Paramètre | Valeur | Signification |
+|-----------|--------|---------------|
+| `rB` | 200 mm | Rayon de la base (moteurs) |
+| `wB` | 100 mm | Distance au centre du triangle de base |
+| `rP` | 40 mm | Rayon de la plateforme (points d'attache) |
+| `L` | 200 mm | Longueur des bras moteurs |
+| `l` | 430 mm | Longueur des bras parallèles (connecteurs) |
+
+---
+
+## 2. Génération de Trajectoires (trajectoires.py)
+
+### 2.1 Trajectoires linéaires
+
+```python
+from trajectoires import lineartrajectory
+
+# Chemin cartésien linéaire
+path = lineartrajectory(
+    start=[0, 0, -300],
+    end=[100, 150, -350],
+    stepsmm=2  # pas de 2mm entre chaque point
+)
+```
+
+### 2.2 Trajectoires articulaires - Linéaire
+
+```python
+from trajectoires import jointmotangles
+
+trajectory, duration = jointmotangles(
+    start=[0, 0, -300],
+    end=[100, 150, -350],
+    speedmot=0.5,           # degrés par pas
+    steps_per_second=250    # cadence
+)
+# Retourne:
+#   - trajectory: array (n_steps, 3) avec angles en degrés
+#   - duration: durée en secondes
+```
+
+**Caractéristiques:**
+- Profil de vitesse **rectangulaire** (vitesse instantanée)
+- Rapide, simple
+- Utile pour spécifications de bas niveau
+
+### 2.3 Trajectoires articulaires - Trapézoïdale (recommandé)
+
+```python
+from trajectoires import jointmotangles_trapezoidal
+
+trajectory, duration = jointmotangles_trapezoidal(
+    start=[0, 0, -300],
+    end=[100, 150, -350],
+    v_max_deg_s=30.0,       # vitesse max (degrés/s)
+    a_max_deg_s2=60.0,      # accélération max (degrés/s²)
+    dt=0.001                # pas de temps (s)
+)
+# Retourne:
+#   - trajectory: array (n_steps, 3) avec angles en degrés
+#   - duration: durée en secondes
+```
+
+**Caractéristiques:**
+- Profil de vitesse **trapézoïdal** (accélération → vitesse constante → décélération)
+- Tous les moteurs synchronisés (terminent au même moment)
+- Courbes lisses et réalistes (sigmoïdes)
+- Idéal pour les mouvements robustiques
+
+### 2.4 Visualisation des trajectoires
+
+```python
+from trajectoires import timediagram
+
+fig = timediagram(trajectory, duration)
+# Affiche 2 graphiques:
+#   1. Angles vs temps (3 moteurs)
+#   2. Vitesses angulaires vs temps (dérivées numériques)
+```
+
+---
+
+## Exemples complets
+
+### Exemple 1: Cinématique simple
+
+```python
+import numpy as np
+from DeltaCoord import DeltaInverse, DeltaForward
+
+# Position de départ
+pos_start = [0, 0, -300]
+angles_start = DeltaInverse(pos_start)
+print(f"Angles de départ: {angles_start}")
+
+# Position finale
+pos_end = [100, 150, -350]
+angles_end = DeltaInverse(pos_end)
+print(f"Angles finaux: {angles_end}")
+
+# Vérification (cinématique directe)
+pos_check = DeltaForward(angles_end)
+print(f"Position calculée: {pos_check}")
+```
+
+### Exemple 2: Trajectoire avec profil trapézoïdal
+
+```python
+from trajectoires import jointmotangles_trapezoidal, timediagram
+import matplotlib.pyplot as plt
+
+# Générer la trajectoire
+trajectory, duration = jointmotangles_trapezoidal(
+    start=[0, 0, -300],
+    end=[100, 150, -350],
+    v_max_deg_s=30.0,
+    a_max_deg_s2=60.0,
+    dt=0.001
+)
+
+print(f"Durée du mouvement: {duration:.3f} s")
+print(f"Nombre de points: {len(trajectory)}")
+
+# Visualiser
+fig = timediagram(trajectory, duration)
+plt.show()  # ou fig.savefig('trajectory.png')
+```
+
+### Exemple 3: Comparaison linéaire vs trapézoïdal
+
+```python
+from trajectoires import jointmotangles, jointmotangles_trapezoidal
+import matplotlib.pyplot as plt
+
+# Profil linéaire
+traj_lin, dur_lin = jointmotangles(
+    [0, 0, -300], [100, 150, -350],
+    speedmot=0.5, steps_per_second=250
+)
+
+# Profil trapézoïdal
+traj_trap, dur_trap = jointmotangles_trapezoidal(
+    [0, 0, -300], [100, 150, -350],
+    v_max_deg_s=30.0, a_max_deg_s2=60.0
+)
+
+print(f"Linéaire      : {len(traj_lin)} points, {dur_lin:.3f} s")
+print(f"Trapézoïdal   : {len(traj_trap)} points, {dur_trap:.3f} s")
+```
+
+---
 
 ## Tests
 
-Exécutez `python DeltaCoord2.py` pour voir les tests automatiques incluant:
-- Tests de cinématique inverse et directe
+Exécutez le module directement pour tester les fonctions:
+
+```bash
+# Tests de cinématique
+python DeltaCoord.py
+
+# Tests de trajectoires
+python trajectoires.py
+```
+
+---
+
+## Notes techniques
+
+### Synchronisation des moteurs
+Tous les moteurs d'une trajectoire trapézoïdale sont synchronisés:
+- Calcul du temps minimal pour chaque moteur
+- Résolution équation: `d = v_peak*T - v_peak²/a`
+- Tous les moteurs utilisent le temps **t_total = max(t_i)**
+
+### Profils de vitesse
+- **Linéaire**: Changements instantanés → actuateurs réels impossible
+- **Trapézoïdal**: Profils lisses → réalistes et robustes
+
+### Format des données
+- **Angles**: en **degrés** (pas radians)
+- **Position XYZ**: en **millimètres**
+- **Arrays**: numpy arrays de shape (n, 3)
 - Vérification aller-retour
 - Test de visualisation
