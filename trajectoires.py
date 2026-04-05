@@ -108,7 +108,7 @@ def jointmotangles_trapezoidal(start, end, v_max_deg_s, a_max_deg_s2, dt=0.001):
     
     return q_path, t_total
 
-def jointmotangles(start, end, speedmot, steps_per_second=1.0):
+def jointmotangles(start, end, deg_per_step, steps_per_second=1.0):
     """Version linéaire simple de jointmotangles (pour compatibilité).
     
     A partir d'une position xyz initiale et une position xyz finale, va renvoyer
@@ -136,13 +136,13 @@ def jointmotangles(start, end, speedmot, steps_per_second=1.0):
     max_motor = np.argmax(np.abs(deltas))
     max_delta = abs(deltas[max_motor])
 
-    if max_delta == 0 or speedmot == 0:
+    if max_delta == 0 or deg_per_step == 0:
         return np.array([start_angles], dtype=float), 0.0
 
     if steps_per_second <= 0:
         raise ValueError("steps_per_second doit etre strictement positif")
 
-    n_steps = int(np.ceil(max_delta / abs(speedmot)))
+    n_steps = int(np.ceil(max_delta / abs(deg_per_step)))
     n_steps = max(1, n_steps)
     duration_sec = n_steps / steps_per_second
 
@@ -220,7 +220,7 @@ def test():
     trajectory_linear, duration_linear = jointmotangles(
         [0, 0, -300], 
         [100, 150, -350], 
-        speedmot=0.5, 
+        deg_per_step=0.5, 
         steps_per_second=250
     )
     print(f"Nombre de points : {len(trajectory_linear)}")
