@@ -239,6 +239,10 @@ def test_forward_inverse():
     print("Forward (erreur format):", DeltaInverse([[0, 0]]))
     
 
+    visualisation(angles= test_angles[0])
+    
+    visualisation(position = DeltaForward(test_angles[0]))
+
 
 def visualisation(position=None, angles=None, ax=None, show_plot=True):
     """
@@ -303,27 +307,33 @@ def visualisation(position=None, angles=None, ax=None, show_plot=True):
         fig = ax.figure
 
     # Positions des moteurs (base fixe)
-    motor1 = (0, -wB, 0)  # Bras 1
-    motor2 = (wB*sqrt(3)/2, wB/2, 0)  # Bras 2 (rotation -120°)
-    motor3 = (-wB*sqrt(3)/2, wB/2, 0)  # Bras 3 (rotation +120°)
-    
-    base1 = (sB/2,wB,0)
-    base2 = (-sB/2,wB,0)
-    base3 = (0,-rB,0)
+    # Le bras 1 pointe dans la direction -Y ; les bras 2 et 3 sont tournés de +120° et +240°.
+    motor1 = (0, -wB, 0)
+    motor2 = ( wB*sqrt(3)/2,  wB/2, 0)   # rotate((0,-wB,0), +120°)
+    motor3 = (-wB*sqrt(3)/2,  wB/2, 0)   # rotate((0,-wB,0), +240°)
+
+    base1 = (sB/2,  wB, 0)
+    base2 = (-sB/2, wB, 0)
+    base3 = (0, -rB, 0)
 
     # Positions des extrémités des bras moteurs
-    arm1_end = (0, wB + L*np.cos(np.radians(theta1)), -L*np.sin(np.radians(theta1)))
-    arm2_end = (-(np.sqrt(3)/2)*(wB + L*np.cos(np.radians(theta2))),
-                -(1/2)*(wB + L*np.cos(np.radians(theta2))),
+    # Pour le bras i, le coude est à : motor_i + L*(0, -cos(θ_i), -sin(θ_i)) dans le repère local,
+    # ce qui donne après rotation par +k*120° :
+    arm1_end = (0,
+                -wB - L*np.cos(np.radians(theta1)),
+                -L*np.sin(np.radians(theta1)))
+    arm2_end = ( (wB + L*np.cos(np.radians(theta2)))*sqrt(3)/2,
+                 (wB + L*np.cos(np.radians(theta2)))/2,
                 -L*np.sin(np.radians(theta2)))
-    arm3_end = ((np.sqrt(3)/2)*(wB + L*np.cos(np.radians(theta3))),
-                -(1/2)*(wB + L*np.cos(np.radians(theta3))),
+    arm3_end = (-(wB + L*np.cos(np.radians(theta3)))*sqrt(3)/2,
+                 (wB + L*np.cos(np.radians(theta3)))/2,
                 -L*np.sin(np.radians(theta3)))
 
     # Positions des points d'attache sur la plateforme outil
-    platform1 = (x0, y0 - rP, z0)
-    platform2 = (x0 + rP*sin(np.radians(-120)), y0 + rP*cos(np.radians(-120)), z0)
-    platform3 = (x0 + rP*sin(np.radians(120)), y0 + rP*cos(np.radians(120)), z0)
+    # Le point d'attache du bras 1 est décalé de -rP selon Y (même convention que -Y pour le bras 1).
+    platform1 = (x0,               y0 - rP,      z0)
+    platform2 = (x0 + rP*sqrt(3)/2, y0 + rP/2,  z0)   # rotate((0,-rP), +120°) + centre
+    platform3 = (x0 - rP*sqrt(3)/2, y0 + rP/2,  z0)   # rotate((0,-rP), +240°) + centre
 
     # Tracer la base fixe (plateforme supérieure)
     base_points = np.array([base1, base2, base3, base1])
