@@ -1,0 +1,123 @@
+
+"""SAUVEGARDE DES FONCTIONS POUR LA GESTION DES POINTS"""
+class Point :
+    def Add_Point(self, nom, Theta1, Theta2, Theta3, Theta4):
+        self.nom = nom
+        self.Theta1 = Theta1
+        self.Theta2 = Theta2
+        self.Theta3 = Theta3
+        self.Theta4 = Theta4
+        
+    
+    """
+    Maxendre 13/04/26
+
+    La fonction servira à créer un point à partir de ses coordonnées et de son nom.
+    ensuite à l'aide du MGD on pourra calculer les coordonnées cartésiennes du point.
+    ------------------------------------------------------------------------------------
+    Elle aura en entrée :
+        - Les Coordonnées Théta1, Théta2, Théta3, Théta4
+        - Le nom du point enregistré
+    ------------------------------------------------------------------------------------
+    Elle aura en sortie :
+        - Un message de confirmation "Point 'XXXXX' enregistré"
+    ------------------------------------------------------------------------------------
+    """
+    pass
+
+    def Affichage_Noms_Points(self):
+        """
+    Maxendre 13/04/26
+
+    La fonction servira à afficher tous les points enregistrés puis permettre à l'utilisateur d'en choisir un pour afficher ses caractéristiques.
+    Liaision avec "Affichage_Point" pour afficher les caractéristiques du point choisi.
+    Utilisation d'une boucle for :
+
+    for nom in self.points:
+            print(nom)
+
+    ------------------------------------------------------------------------------------
+    Elle aura en entrée :
+        - rien
+    ------------------------------------------------------------------------------------
+    Elle aura en sortie :
+        - rien, juste l'affichage de tous les points et de leurs caractéristiques
+    ------------------------------------------------------------------------------------
+    """
+
+    pass
+        
+    def Affichage_Point(self):
+        """
+    Maxendre 13/04/26
+
+    La fonction servira à afficher un point particulier et toutes ses caractéristiques
+    Utilisation d'une reconnaissance de nom pour afficher le point voulu. (Affichage_Noms_Points)
+    Affichage Print des valeurs.
+    ------------------------------------------------------------------------------------
+    Elle aura en entrée :
+        - le nom du point à afficher grâce à la reconnaissance de nom (Affichage_Noms_Points)
+    ------------------------------------------------------------------------------------
+    Elle aura en sortie :
+        - rien, juste l'affichage du point et de ses caractéristiques
+    ------------------------------------------------------------------------------------
+    """
+    
+    pass
+
+    def Suppression_Point(self):
+        """
+    Maxendre 13/04/26
+
+    La fonction servira à supprimer un point particulier et toutes ses caractéristiques
+    Utilisation d'une reconnaissance de nom pour supprimer le point voulu. (Affichage_Noms_Points)
+    Utilisation de la fonction .pop() pour supprimer le point de la liste.
+    ------------------------------------------------------------------------------------
+    Elle aura en entrée :
+        - le nom du point à supprimer grâce à la reconnaissance de nom (Affichage_Noms_Points)
+    ------------------------------------------------------------------------------------
+    Elle aura en sortie :
+        - un message de confirmation "Point 'XXXXX' supprimé"
+    ------------------------------------------------------------------------------------
+    """
+    pass
+
+
+
+class User_Frame:
+    def User_Frame(self):
+
+        """Apprentissage du user frame
+    On utilisera la méthode des 2 points en forcant le Z vertical et vers le haut car Delta ne peut pas se tourner en X et Y
+    Pour la méthode des 2 points on va sauver 1 point (ORIGINE) et 1 point (X) ensuite on va "normer" le vecteur X à 1 unité.
+    Ensuite on va pouvoir avoir l'axe Z en créant une perpendiculaire à l'axe X pour aller vers le haut.
+    Finalement calculer L'axe Y en faisant le produit vectoriel de Z et X.
+    On aura donc les 3 axes X Y Z avec 2 points.
+    ------------------------------------------------------------------------------------
+    Ensuite utiliser ce frame pour faire les calculs de MGD et MGI en utilisant les coordonnées du user frame au lieu du frame de base.
+    ------------------------------------------------------------------------------------
+    """
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
