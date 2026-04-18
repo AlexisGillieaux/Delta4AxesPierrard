@@ -1,4 +1,4 @@
-import DeltaCoord as d1
+import DeltaCoord_fixed as d1
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -251,5 +251,6 @@ def test():
         plt.savefig("trajectoire_trapezoidal.png", dpi=150, bbox_inches='tight')
         print("Graphique sauvegardé : trajectoire_trapezoidal.png")
     plt.show()
-
+print(d1.DeltaInverse([0, 0, -300]))
+print(d1.DeltaInverse([100, 150, -350]))
 test()
