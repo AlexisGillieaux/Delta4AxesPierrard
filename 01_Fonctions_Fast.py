@@ -190,6 +190,7 @@ class Free_Drive:
         """Ajustement des moteurs
     Permettra de comparer les capteur de courant de chaque moteur pour calculer à quel point on force sur chaque moteur, prendre en compte cette valeur et bouger le robot en conséquence pour compenser les forces et éviter de forcer sur les moteurs.
     Ensuite, on pourra faire une fonction d'ajustement automatique qui va faire bouger le robot dans les 3 axes et ajuster les moteurs en fonction des forces ressenties pour trouver la position optimale du robot.   
+    Les valeurs des angles des moteurs seront repris dans une autre fonction (MGI/MGD)
     ------------------------------------------------------------------------------------
     Elle aura en entrée :
         - les valeurs des capteurs de courant de chaque moteur
