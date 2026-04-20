@@ -213,6 +213,57 @@ def timediagram(trajectory, duration_sec):
     
     return fig
 
+
+
+def cartesian_trapezoidal_trajectory(start, end, v_max_mm_s, a_max_mm_s2, dt=0.001):
+    """
+    Génère une trajectoire en ligne droite (XYZ) avec profil de vitesse 
+    trapézoïdal, puis convertit en angles moteurs.
+    """
+    start = np.array(start)
+    end = np.array(end)
+    distance = np.linalg.norm(end - start)
+    direction = (end - start) / distance
+
+    # 1. Calcul du profil trapézoïdal sur la distance XYZ
+    if (v_max_mm_s**2 / a_max_mm_s2) > distance:
+        # Profil triangulaire
+        t_acc = np.sqrt(distance / a_max_mm_s2)
+        t_total = 2 * t_acc
+        v_peak = a_max_mm_s2 * t_acc
+        t_cruise = 0
+    else:
+        # Profil trapézoïdal
+        t_acc = v_max_mm_s / a_max_mm_s2
+        t_cruise = (distance - (v_max_mm_s**2 / a_max_mm_s2)) / v_max_mm_s
+        t_total = 2 * t_acc + t_cruise
+        v_peak = v_max_mm_s
+
+    time_array = np.arange(0, t_total + dt, dt)
+    joint_trajectory = []
+
+    # 2. Génération des points XYZ et conversion inverse
+    for t in time_array:
+        # Calcul de la distance parcourue s(t) à l'instant t
+        if t < t_acc:
+            s = 0.5 * a_max_mm_s2 * t**2
+        elif t < t_acc + t_cruise:
+            s = (0.5 * a_max_mm_s2 * t_acc**2) + v_peak * (t - t_acc)
+        else:
+            t_decel = t - (t_acc + t_cruise)
+            s = distance - 0.5 * a_max_mm_s2 * (t_total - t)**2
+        
+        # Point XYZ actuel
+        current_xyz = start + s * direction
+        
+        # Conversion en angles (Inverse Kinematics)
+        angles = np.asarray(d1.DeltaInverse(current_xyz)).reshape(-1, 3)[0]
+        joint_trajectory.append(angles)
+
+    return np.array(joint_trajectory), t_total
+
+
+
 def test():
     print("="*70)
     print("TEST 1 : Trajectoire LINÉAIRE (jointmotangles)")
@@ -253,4 +304,33 @@ def test():
     plt.show()
 print(d1.DeltaInverse([0, 0, -300]))
 print(d1.DeltaInverse([100, 150, -350]))
+
 test()
+
+# --- TEST ET AFFICHAGE AVEC SAUVEGARDE ---
+
+start_pos = [-200, 200, -200]
+end_pos = [175, -250, -350]
+
+# Paramètres : 200 mm/s max, 500 mm/s² accélération
+traj, duration = cartesian_trapezoidal_trajectory(
+    start_pos, end_pos, v_max_mm_s=200.0, a_max_mm_s2=500.0, dt=0.01
+)
+
+print(f"Durée du mouvement : {duration:.3f} s")
+fig = timediagram(traj, duration)
+
+if fig:
+    
+    # Sauvegarde du fichier avant plt.show()
+    plt.savefig("trajectoire_linéaire.png", dpi=150, bbox_inches='tight')
+    print("Graphique sauvegardé avec succès : trajectoire_linéaire.png")
+    
+    plt.show()
+
+
+
+
+
+
+
