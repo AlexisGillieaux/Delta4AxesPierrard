@@ -174,6 +174,8 @@ class Free_Drive:
     def Free_Drive(self):
         """Free Drive
     Permettra de déplacer le robot manuellement en mode free drive pour apprendre des points ou pour faire des ajustements.
+    Le robot en free drive ne répondra pas aux commandes de mouvement et ne fera que suivre les mouvements manuels de l'utilisateur. 
+    De plus il commandera les moteurs pour le garder dans les airs à la position souhaitée et éviter qu'il ne tombe ou ne se déplace de manière incontrôlée.
     ------------------------------------------------------------------------------------
     Elle aura en entrée :
         - rien, juste l'activation du mode free drive
@@ -183,7 +185,23 @@ class Free_Drive:
     ------------------------------------------------------------------------------------
     """
 
-    
+    def Ajustement_Moteurs (self):
+        """Ajustement des moteurs
+    Permettra de comparer les capteur de courant de chaque moteur pour calculer à quel point on force sur chaque moteur, prendre en compte cette valeur et bouger le robot en conséquence pour compenser les forces et éviter de forcer sur les moteurs.
+    Ensuite, on pourra faire une fonction d'ajustement automatique qui va faire bouger le robot dans les 3 axes et ajuster les moteurs en fonction des forces ressenties pour trouver la position optimale du robot.   
+    ------------------------------------------------------------------------------------
+    Elle aura en entrée :
+        - les valeurs des capteurs de courant de chaque moteur
+    ------------------------------------------------------------------------------------
+    Elle aura en sortie :
+        - l'activation des moteurs pour compenser les forces ressenties
+        - les nouvelles positions du robot en fonction des ajustements 
+    ------------------------------------------------------------------------------------
+    """
+        
+
+
+        
 
 
 
