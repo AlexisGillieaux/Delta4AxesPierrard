@@ -98,14 +98,92 @@ class User_Frame:
     ------------------------------------------------------------------------------------
     """
 
+    def Affichage_User_Frame(self):
+        """Affichage du user frame
+    Il aura la liste de tous les userframe et pourra les ressortir en sortie lors de l'appel de la fonction.
+    ------------------------------------------------------------------------------------
+    Elle aura en entrée :
+        - rien
+    ------------------------------------------------------------------------------------
+    Elle aura en sortie :
+        - l'affichage de tous les user frame enregistrés
+    ------------------------------------------------------------------------------------
+    """
+        
 
+ class Tool_Frame:
+    def Tool_Frame(self):
+        """Apprentissage du tool frame
+    On utilisera la méthode des 3 points 
+    ------------------------------------------------------------------------------------
+    Ensuite utiliser ce frame pour faire les calculs de MGD et MGI en utilisant les coordonnées du tool frame au lieu du frame de base.
+    ------------------------------------------------------------------------------------
+    """
 
+    def Affichage_Tool_Frame(self):
+        """Affichage du tool frame
+    Il aura la liste de tous les toolframe et pourra les ressortir en sortie lors de l'appel de la fonction.
+    ------------------------------------------------------------------------------------
+    """
 
+    def update_TCP(self):
+        """Update du TCP
+    Permettra de recalculer les coordonnées par rapport à l'outil et pas au niveau du préhenseur.
+    ------------------------------------------------------------------------------------
+    Elle aura en entrée :
+        - les coordonnées du TCP
+    ------------------------------------------------------------------------------------
+    Elle aura en sortie :
+        - un message de confirmation "TCP mis à jour"
+        - Les nouveles coordonnées du TCP
+    ------------------------------------------------------------------------------------
+    elle aura évidemment les décalages pour chaque type d'outil ///// A VOIR SI ON RAJOUTE DES FONCTIONS AVEC AJOUT D OUTIL OU SI C EST DEJA PROGRAMMé!!!!
+    Mais comme on est dans la classe normakement on aura l'outil déjà enregistré et on pourra faire les calculs de décalage à l'intérieur de la fonction update_TCP
+    """
+        
 
+    def Check_Boudaries(self):
+        """Check des limites de travail
+    Permettra de vérifier que les coordonnées du TCP sont dans les limites de travail du robot.
+    ------------------------------------------------------------------------------------
+    Elle aura en entrée :
+        - les coordonnées du TCP
+    ------------------------------------------------------------------------------------
+    Elle aura en sortie :
+        - un message de confirmation "TCP dans les limites de travail" ou "TCP hors des limites de travail"
+    ------------------------------------------------------------------------------------
+    """
+        
 
+    def Check_Payload(self):
+        """Check de la charge utile
+    Permettra de vérifier que la charge utile de l'outil est dans les limites de charge du robot.
+    Elle modifiera l'accélération et la vitesse maximale du robot en fonction de la charge utile de l'outil.
+    ------------------------------------------------------------------------------------
+    Elle aura en entrée :
+        - la charge utile de l'outil
+    ------------------------------------------------------------------------------------
+    Elle aura en sortie :
+        - un message de confirmation "Charge utile dans les limites" ou "Charge utile hors des limites"
+        - les nouvelles valeurs d'accélération et de vitesse maximale du robot en fonction de la charge utile de l'outil
+    ------------------------------------------------------------------------------------
+    """
+        
 
+class Free_Drive:
+    def Free_Drive(self):
+        """Free Drive
+    Permettra de déplacer le robot manuellement en mode free drive pour apprendre des points ou pour faire des ajustements.
+    ------------------------------------------------------------------------------------
+    Elle aura en entrée :
+        - rien, juste l'activation du mode free drive
+    ------------------------------------------------------------------------------------
+    Elle aura en sortie :
+        - un message de confirmation "Mode Free Drive activé"
+    ------------------------------------------------------------------------------------
+    """
 
-
+    
 
 
 
