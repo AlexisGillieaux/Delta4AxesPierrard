@@ -33,20 +33,7 @@ def afficher_vecteurs(points):
 
     plt.show()
 
-
-def main():
-    p1 = Point(1, 2, 3)
-    p2 = Point(4, 1, 2)
-    p3 = Point(2, 5, 1)
-
-    points = [p1, p2, p3]
-    afficher_vecteurs(points)
-
-
-if __name__ == "__main__":
-    main()
-
-
+    
 def afficher_vecteurs_entre_points(points):
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
@@ -67,3 +54,17 @@ def afficher_vecteurs_entre_points(points):
         )
 
     plt.show()
+
+def main():
+    p1 = Point(1, 2, 3)
+    p2 = Point(4, 1, 2)
+    p3 = Point(2, 5, 1)
+
+    points = [p1, p2, p3]
+    afficher_vecteurs(points)
+
+
+if __name__ == "__main__":
+    main()
+
+
