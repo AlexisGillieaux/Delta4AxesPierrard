@@ -127,7 +127,7 @@ class Tool_Frame:
     ------------------------------------------------------------------------------------
     """
 
-    def update_TCP(self):
+    def update_TCP(self, TCP_coordinates):
         """Update du TCP
     Permettra de recalculer les coordonnées par rapport à l'outil et pas au niveau du préhenseur.
     ------------------------------------------------------------------------------------
@@ -143,7 +143,7 @@ class Tool_Frame:
     """
         
 
-    def Check_Boudaries(self):
+    def Check_Boudaries(self, TCP_coordinates):
         """Check des limites de travail
     Permettra de vérifier que les coordonnées du TCP sont dans les limites de travail du robot.
     ------------------------------------------------------------------------------------
@@ -156,7 +156,7 @@ class Tool_Frame:
     """
         
 
-    def Check_Payload(self):
+    def Check_Payload(self, payload):
         """Check de la charge utile
     Permettra de vérifier que la charge utile de l'outil est dans les limites de charge du robot.
     Elle modifiera l'accélération et la vitesse maximale du robot en fonction de la charge utile de l'outil.
@@ -172,21 +172,22 @@ class Tool_Frame:
         
 
 class Free_Drive:
-    def Free_Drive(self):
+    def Free_Drive(self, commande_activation):
         """Free Drive
     Permettra de déplacer le robot manuellement en mode free drive pour apprendre des points ou pour faire des ajustements.
     Le robot en free drive ne répondra pas aux commandes de mouvement et ne fera que suivre les mouvements manuels de l'utilisateur. 
     De plus il commandera les moteurs pour le garder dans les airs à la position souhaitée et éviter qu'il ne tombe ou ne se déplace de manière incontrôlée.
     ------------------------------------------------------------------------------------
     Elle aura en entrée :
-        - rien, juste l'activation du mode free drive
+        - le bit de commande d'activation du mode free drive
     ------------------------------------------------------------------------------------
     Elle aura en sortie :
         - un message de confirmation "Mode Free Drive activé"
+        - un bit local d'activation du mode free drive pour le robot
     ------------------------------------------------------------------------------------
     """
 
-    def Ajustement_Moteurs (self):
+    def Ajustement_Moteurs (self): #A REVOIR car pas de capteur de courants
         """Ajustement des moteurs
     Permettra de comparer les capteur de courant de chaque moteur pour calculer à quel point on force sur chaque moteur, prendre en compte cette valeur et bouger le robot en conséquence pour compenser les forces et éviter de forcer sur les moteurs.
     Ensuite, on pourra faire une fonction d'ajustement automatique qui va faire bouger le robot dans les 3 axes et ajuster les moteurs en fonction des forces ressenties pour trouver la position optimale du robot.   
@@ -200,9 +201,30 @@ class Free_Drive:
         - les nouvelles positions du robot en fonction des ajustements 
     ------------------------------------------------------------------------------------
     """
-        
 
-
+class Pince:
+    def Ouverture_Pince(self, commande_ouverture):
+        """Ouverture de la pince
+    Permettra d'ouvrir la pince pour saisir un objet 50x50x50. Elle devra pouvoir s'ouvrir en moins d"une seconde pour correspondre au cahier des charges.
+    ------------------------------------------------------------------------------------
+    Elle aura en entrée :
+        - le bit de commande d'ouverture de la pince
+    ------------------------------------------------------------------------------------
+    Elle aura en sortie :
+        - le mouvement de l'ouverture de la pince
+    ------------------------------------------------------------------------------------
+    """
+    def Fermeture_Pince(self, commande_fermeture):
+        """Fermeture de la pince
+    Permettra de fermer la pince pour saisir un objet 50x50x50. Elle devra pouvoir se fermer en moins d'une seconde pour correspondre au cahier des charges.
+    ------------------------------------------------------------------------------------
+    Elle aura en entrée :
+        - le bit de commande de fermeture de la pince
+    ------------------------------------------------------------------------------------
+    Elle aura en sortie :
+        - le mouvement de la fermeture de la pince
+    ------------------------------------------------------------------------------------
+        """
         
 
 

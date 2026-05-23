@@ -1,4 +1,4 @@
-import DeltaCoord as d1
+import OLD.DeltaCoord as d1
 import numpy as np
 import matplotlib.pyplot as plt
 from trajectoires import jointmotangles, jointmotangles_trapezoidal, timediagram
