@@ -49,7 +49,7 @@ pip install -r requirements.txt
 
 ---
 
-## M2 — Mission 2
+## M2 — Master 2
 
 ### rigid_transform.py — Classe `RigidTransform`
 
