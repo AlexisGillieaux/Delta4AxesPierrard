@@ -1,0 +1,565 @@
+"""
+----------------TEST 1---------------------
+
+ from vpython import *
+
+scene.background = color.black
+box = box(color=color.white)
+
+while True:
+    rate(30)
+ """
+
+
+"""
+--------------TEST 2-------------------
+
+from vpython import *
+
+scene = canvas(title="Delta", width=800, height=600, background=color.black)
+
+floor = box(pos=vector(0, 0, 0), length=4, height=0.5, width=4, color=color.blue)
+ball = sphere(pos=vector(0, 4, 0), radius=1, color=color.red)
+ball.velocity = vector(0, -1, 0)
+dt = 0.01
+
+while True:
+    rate(30)
+    ball.pos = ball.pos + ball.velocity * dt
+
+    if ball.pos.y < ball.radius:
+        ball.velocity.y = abs(ball.velocity.y)
+    else:
+        ball.velocity.y = ball.velocity.y - 9.8 * dt
+
+"""
+"""
+
+---------------TEST 3 ---------------------
+
+from vpython import sphere, vector, color, canvas, button, slider, winput, rate
+
+# 1. Création de la scène 3D
+scene = canvas(title='VPython - Contrôle de Position', width=800, height=500)
+
+# 2. Objet 3D principal
+objet = sphere(pos=vector(0, 0, 0), radius=1, color=color.red)
+
+# 3. Fonctions pour appliquer les changements
+def mettre_a_jour_position(x, y, z):
+    objet.pos = vector(x, y, z)
+    # Mettre à jour les entrées texte et les sliders pour synchroniser
+    input_x.text = str(round(x, 2))
+    input_y.text = str(round(y, 2))
+    input_z.text = str(round(z, 2))
+    slider_x.value = x
+    slider_y.value = y
+
+def action_slider_x(s):
+    mettre_a_jour_position(s.value, objet.pos.y, objet.pos.z)
+
+def action_slider_y(s):
+    mettre_a_jour_position(objet.pos.x, s.value, objet.pos.z)
+
+def valider_champs(e):
+    try:
+        x = float(input_x.text)
+        y = float(input_y.text)
+        z = float(input_z.text)
+        mettre_a_jour_position(x, y, z)
+    except ValueError:
+        pass  # Ignore si le texte entré n'est pas un nombre validable
+
+def reinitialiser():
+    mettre_a_jour_position(0, 0, 0)
+
+# 4. Ajout des Widgets (Interface utilisateur)
+scene.append_to_caption("\n--- Contrôle par Curseur ---\n\n")
+scene.append_to_caption("Position X : ")
+slider_x = slider(min=-10, max=10, value=0, length=300, bind=action_slider_x)
+
+scene.append_to_caption("\n\nPosition Y : ")
+slider_y = slider(min=-10, max=10, value=0, length=300, bind=action_slider_y)
+
+scene.append_to_caption("\n\n--- Entrée Précise ---\n\n")
+scene.append_to_caption("X: ")
+input_x = winput(text='0.0', bind=valider_champs)
+scene.append_to_caption("  Y: ")
+input_y = winput(text='0.0', bind=valider_champs)
+scene.append_to_caption("  Z: ")
+input_z = winput(text='0.0', bind=valider_champs)
+
+scene.append_to_caption("   ")
+button(text='Appliquer Position', bind=valider_champs)
+button(text='Remettre à (0,0,0)', bind=reinitialiser)
+
+# 5. Boucle principale
+while True:
+    rate(60)
+
+
+    """
+
+from vpython import canvas, triangle, vertex, compound, vector, color, slider, winput, button, rate
+import trimesh
+
+# ==========================================
+# 1. FONCTION D'IMPORTATION DE FICHIER CAD (STL)
+# ==========================================
+def importer_stl(chemin_fichier):
+    """Charge un fichier STL et le transforme en un objet VPython manipulable."""
+    mesh = trimesh.load(chemin_fichier)
+    
+    # Redimensionner et centrer la pièce si elle est trop grande (courant avec Inventor en mm)
+    mesh.density.linear
+    mesh.vertices -= mesh.center_mass
+    
+    facettes = []
+    for face in mesh.faces:
+        p1, p2, p3 = mesh.vertices[face]
+        
+        v1 = vertex(pos=vector(*p1), color=color.cyan)
+        v2 = vertex(pos=vector(*p2), color=color.cyan)
+        v3 = vertex(pos=vector(*p3), color=color.cyan)
+        
+        facettes.append(triangle(vs=[v1, v2, v3]))
+    
+    # Fusionne toutes les faces en un seul objet 3D
+    objet_cad = compound(facettes)
+    return objet_cad
+
+# ==========================================
+# 2. CONFIGURATION DE LA SCÈNE ET CHARGEMENT
+# ==========================================
+scene = canvas(title="VPython - Contrôle de Modèle CAD", width=900, height=550)
+
+# Remplacez 'mon_modele.stl' par le chemin de votre fichier exporté depuis Inventor
+try:
+    objet = importer_stl('mon_modele.stl')
+except Exception as e:
+    print(f"Fichier STL introuvable, création d'une forme de remplacement. ({e})")
+    # Forme temporaire si aucun fichier STL n'est fourni
+    from vpython import sphere
+    objet = sphere(pos=vector(0, 0, 0), radius=1, color=color.red)
+
+# ==========================================
+# 3. FONCTIONS ET CONTRÔLES DE L'INTERFACE
+# ==========================================
+def mettre_a_jour_position(x, y, z):
+    objet.pos = vector(x, y, z)
+    input_x.text = str(round(x, 2))
+    input_y.text = str(round(y, 2))
+    input_z.text = str(round(z, 2))
+    slider_x.value = x
+    slider_y.value = y
+    slider_z.value = z
+
+def changer_x(s):
+    mettre_a_jour_position(s.value, objet.pos.y, objet.pos.z)
+
+def changer_y(s):
+    mettre_a_jour_position(objet.pos.x, s.value, objet.pos.z)
+
+def changer_z(s):
+    mettre_a_jour_position(objet.pos.x, objet.pos.y, s.value)
+
+def valider_saisie(e):
+    try:
+        x = float(input_x.text)
+        y = float(input_y.text)
+        z = float(input_z.text)
+        mettre_a_jour_position(x, y, z)
+    except ValueError:
+        pass
+
+def reinitialiser():
+    mettre_a_jour_position(0, 0, 0)
+
+# ==========================================
+# 4. CONSTRUCTION DE L'INTERFACE UTILISATEUR
+# ==========================================
+scene.append_to_caption("\n<b>--- Contrôle par Curseurs ---</b>\n\n")
+
+scene.append_to_caption("Position X : ")
+slider_x = slider(min=-20, max=20, value=0, length=300, bind=changer_x)
+
+scene.append_to_caption("\n\nPosition Y : ")
+slider_y = slider(min=-20, max=20, value=0, length=300, bind=changer_y)
+
+scene.append_to_caption("\n\nPosition Z : ")
+slider_z = slider(min=-20, max=20, value=0, length=300, bind=changer_z)
+
+scene.append_to_caption("\n\n<b>--- Entrée Précise ---</b>\n\n")
+
+scene.append_to_caption("X: ")
+input_x = winput(text='0.0', bind=valider_saisie)
+scene.append_to_caption("  Y: ")
+input_y = winput(text='0.0', bind=valider_saisie)
+scene.append_to_caption("  Z: ")
+input_z = winput(text='0.0', bind=valider_saisie)
+
+scene.append_to_caption("   ")
+button(text='Appliquer', bind=valider_saisie)
+button(text='Reset (0,0,0)', bind=reinitialiser)
+
+# ==========================================
+# 5. BOUCLE PRINCIPALE
+# ==========================================
+while True:
+    rate(60)
+
+
+"""
+
+---------------TEST 4-------------------------
+
+from vpython import *
+
+scene = canvas(title='Robot Delta - Modèle réel', width=1000, height=700, background=color.black)
+scene.range = 22
+scene.forward = vector(0, -0.4, -1)
+scene.capture('mouse')
+
+# -----------------------------------------------------------
+# Paramètres du robot Delta
+# -----------------------------------------------------------
+R_base = 7.0
+R_effector = 2.8
+base_z = 8.0
+plate_z = -3.0
+angles = [0, 2*pi/3, 4*pi/3]
+
+# -----------------------------------------------------------
+# Axes fictifs pour se repérer
+# -----------------------------------------------------------
+axis_x = arrow(pos=vector(0, 0, 0), axis=vector(10, 0, 0), shaftwidth=0.12, color=color.red)
+axis_y = arrow(pos=vector(0, 0, 0), axis=vector(0, 10, 0), shaftwidth=0.12, color=color.green)
+axis_z = arrow(pos=vector(0, 0, 0), axis=vector(0, 0, 10), shaftwidth=0.12, color=color.blue)
+label_x = text(text='X', pos=vector(10.8, 0, 0), color=color.red, height=0.7)
+label_y = text(text='Y', pos=vector(0, 10.8, 0), color=color.green, height=0.7)
+label_z = text(text='Z', pos=vector(0, 0, 10.8), color=color.blue, height=0.7)
+
+# -----------------------------------------------------------
+# Objets fixes
+# -----------------------------------------------------------
+base_plate = ring(pos=vector(0, 0, base_z), axis=vector(0, 0, 1), radius=R_base + 0.9, thickness=0.25, color=color.gray(0.5), opacity=0.60)
+base_ring = ring(pos=vector(0, 0, base_z + 0.7), axis=vector(0, 0, 1), radius=R_base, thickness=0.18, color=color.gray(0.35), opacity=0.45)
+
+motors = []
+for a in angles:
+    p = vector(cos(a) * R_base, sin(a) * R_base, base_z)
+    m = sphere(pos=p, radius=0.5, color=color.orange)
+    motors.append(m)
+
+# -----------------------------------------------------------
+# Partie inférieure mobile
+# -----------------------------------------------------------
+plate = cylinder(pos=vector(0, 0, plate_z), axis=vector(0, 0, 0.6), radius=R_effector + 0.7, color=color.cyan, opacity=0.40)
+plate_center = sphere(pos=vector(0, 0, plate_z), radius=0.35, color=color.white, opacity=0.25)
+
+platform_joints = []
+for a in angles:
+    jp = vector(cos(a) * R_effector, sin(a) * R_effector, plate_z)
+    j = sphere(pos=jp, radius=0.22, color=color.green, opacity=0.60)
+    platform_joints.append(j)
+
+arms = []
+for i, a in enumerate(angles):
+    p1 = motors[i].pos
+    p2 = platform_joints[i].pos
+    arm = cylinder(pos=p1, axis=p2 - p1, radius=0.12, color=color.white)
+    arms.append(arm)
+
+# -----------------------------------------------------------
+# Paramètres de commande
+# -----------------------------------------------------------
+step = 0.12
+rot_step = 0.08
+press_step = 0.03
+
+pressed = {
+    'X-': False,
+    'X+': False,
+    'Y-': False,
+    'Y+': False,
+    'Z-': False,
+    'Z+': False,
+    'Rot Z-': False,
+    'Rot Z+': False,
+    'Reset': False,
+}
+
+
+
+def update_effector(x, y, z, yaw=0):
+    plate.pos = vector(x, y, z)
+    plate_center.pos = vector(x, y, z)
+    plate.rotate(angle=yaw, axis=vector(0, 0, 1), origin=vector(0, 0, 0))
+
+    for i, a in enumerate(angles):
+        p_joint = vector(x, y, z) + vector(cos(a + yaw) * R_effector, sin(a + yaw) * R_effector, 0)
+        platform_joints[i].pos = p_joint
+        arms[i].pos = motors[i].pos
+        arms[i].axis = p_joint - motors[i].pos
+
+
+def retour_0_0_0():
+    update_effector(0, 0, -2.5, 0)
+
+
+def move(dx, dy, dz):
+    x = plate.pos.x + dx
+    y = plate.pos.y + dy
+    z = plate.pos.z + dz
+    update_effector(x, y, z, 0)
+
+
+def rotate_z(delta):
+    current = plate.pos
+    update_effector(current.x, current.y, current.z, delta)
+
+
+def trigger_once(name, dx, dy, dz):
+    pressed[name] = True
+    move(dx, dy, dz)
+
+
+def trigger_rotation_once(name, delta):
+    pressed[name] = True
+    rotate_z(delta)
+
+
+def clear_pressed():
+    for key in pressed:
+        pressed[key] = False
+
+
+# -----------------------------------------------------------
+# Boutons de commande hors de la zone 3D
+# -----------------------------------------------------------
+# Les boutons restent en dehors de la scène 3D et sont activés au moment du clic.
+button(text='X-', bind=lambda: trigger_once('X-', -press_step, 0, 0))
+button(text='X+', bind=lambda: trigger_once('X+', press_step, 0, 0))
+button(text='Y-', bind=lambda: trigger_once('Y-', 0, -press_step, 0))
+button(text='Y+', bind=lambda: trigger_once('Y+', 0, press_step, 0))
+button(text='Z-', bind=lambda: trigger_once('Z-', 0, 0, -press_step))
+button(text='Z+', bind=lambda: trigger_once('Z+', 0, 0, press_step))
+button(text='Rot Z-', bind=lambda: trigger_rotation_once('Rot Z-', -rot_step))
+button(text='Rot Z+', bind=lambda: trigger_rotation_once('Rot Z+', rot_step))
+button(text='Reset', bind=lambda: retour_0_0_0())
+
+
+# release de toutes les actions quand la souris remonte
+scene.bind('mouseup', lambda: clear_pressed())
+
+# -----------------------------------------------------------
+# Boucle principale
+# -----------------------------------------------------------
+retour_0_0_0()
+
+while True:
+    rate(60)
+
+    if pressed['X-']:
+        move(-step, 0, 0)
+    if pressed['X+']:
+        move(step, 0, 0)
+    if pressed['Y-']:
+        move(0, -step, 0)
+    if pressed['Y+']:
+        move(0, step, 0)
+    if pressed['Z-']:
+        move(0, 0, -step)
+    if pressed['Z+']:
+        move(0, 0, step)
+    if pressed['Rot Z-']:
+        rotate_z(-rot_step)
+    if pressed['Rot Z+']:
+        rotate_z(rot_step)
+    if pressed['Reset']:
+        retour_0_0_0()
+        pressed['Reset'] = False
+
+"""
+
+
+
+"""
+
+----------------TEST6---------------------
+from vpython import *
+
+scene = canvas(title='Robot Delta - Modèle réel', width=1000, height=700, background=color.black)
+scene.range = 22
+scene.forward = vector(0, -0.4, -1)
+scene.capture('mouse')
+
+# -----------------------------------------------------------
+# Paramètres du robot Delta
+# -----------------------------------------------------------
+R_base = 7.0
+R_effector = 2.8
+base_z = 8.0
+plate_z = -3.0
+angles = [0, 2*pi/3, 4*pi/3]
+
+# -----------------------------------------------------------
+# Axes fictifs pour se repérer
+# -----------------------------------------------------------
+axis_x = arrow(pos=vector(0, 0, 0), axis=vector(10, 0, 0), shaftwidth=0.12, color=color.red)
+axis_y = arrow(pos=vector(0, 0, 0), axis=vector(0, 10, 0), shaftwidth=0.12, color=color.green)
+axis_z = arrow(pos=vector(0, 0, 0), axis=vector(0, 0, 10), shaftwidth=0.12, color=color.blue)
+label_x = text(text='X', pos=vector(10.8, 0, 0), color=color.red, height=0.7)
+label_y = text(text='Y', pos=vector(0, 10.8, 0), color=color.green, height=0.7)
+label_z = text(text='Z', pos=vector(0, 0, 10.8), color=color.blue, height=0.7)
+
+# -----------------------------------------------------------
+# Objets fixes
+# -----------------------------------------------------------
+base_plate = ring(pos=vector(0, 0, base_z), axis=vector(0, 0, 1), radius=R_base + 0.9, thickness=0.25, color=color.gray(0.5), opacity=0.60)
+base_ring = ring(pos=vector(0, 0, base_z + 0.7), axis=vector(0, 0, 1), radius=R_base, thickness=0.18, color=color.gray(0.35), opacity=0.45)
+
+motors = []
+for a in angles:
+    p = vector(cos(a) * R_base, sin(a) * R_base, base_z)
+    m = sphere(pos=p, radius=0.5, color=color.orange)
+    motors.append(m)
+
+# -----------------------------------------------------------
+# Partie inférieure mobile
+# -----------------------------------------------------------
+plate = cylinder(pos=vector(0, 0, plate_z), axis=vector(0, 0, 0.6), radius=R_effector + 0.7, color=color.cyan, opacity=0.40)
+plate_center = sphere(pos=vector(0, 0, plate_z), radius=0.35, color=color.white, opacity=0.25)
+
+platform_joints = []
+for a in angles:
+    jp = vector(cos(a) * R_effector, sin(a) * R_effector, plate_z)
+    j = sphere(pos=jp, radius=0.22, color=color.green, opacity=0.60)
+    platform_joints.append(j)
+
+arms = []
+for i, a in enumerate(angles):
+    p1 = motors[i].pos
+    p2 = platform_joints[i].pos
+    arm = cylinder(pos=p1, axis=p2 - p1, radius=0.12, color=color.white)
+    arms.append(arm)
+
+# -----------------------------------------------------------
+# Paramètres de commande
+# -----------------------------------------------------------
+step = 0.12
+rot_step = 0.08
+press_step = 0.03
+
+pressed = {
+    'X-': False,
+    'X+': False,
+    'Y-': False,
+    'Y+': False,
+    'Z-': False,
+    'Z+': False,
+    'Rot Z-': False,
+    'Rot Z+': False,
+    'Reset': False,
+}
+
+
+
+def update_effector(x, y, z, yaw=0):
+    plate.pos = vector(x, y, z)
+    plate_center.pos = vector(x, y, z)
+    plate.rotate(angle=yaw, axis=vector(0, 0, 1), origin=vector(0, 0, 0))
+
+    for i, a in enumerate(angles):
+        p_joint = vector(x, y, z) + vector(cos(a + yaw) * R_effector, sin(a + yaw) * R_effector, 0)
+        platform_joints[i].pos = p_joint
+        arms[i].pos = motors[i].pos
+        arms[i].axis = p_joint - motors[i].pos
+
+
+def retour_0_0_0():
+    update_effector(0, 0, -2.5, 0)
+
+
+def move(dx, dy, dz):
+    x = plate.pos.x + dx
+    y = plate.pos.y + dy
+    z = plate.pos.z + dz
+    update_effector(x, y, z, 0)
+
+
+def rotate_z(delta):
+    current = plate.pos
+    update_effector(current.x, current.y, current.z, delta)
+
+
+def trigger_once(name, dx, dy, dz):
+    for key in pressed:
+        pressed[key] = False
+    pressed[name] = True
+    move(dx, dy, dz)
+
+
+def trigger_rotation_once(name, delta):
+    for key in pressed:
+        pressed[key] = False
+    pressed[name] = True
+    rotate_z(delta)
+
+
+def clear_pressed():
+    for key in pressed:
+        pressed[key] = False
+
+
+# -----------------------------------------------------------
+# Boutons de commande hors de la zone 3D
+# -----------------------------------------------------------
+# Les boutons restent en dehors de la scène 3D et sont activés tant que le clic est maintenu.
+button(text='X-', bind=lambda: trigger_once('X-', -press_step, 0, 0))
+button(text='X+', bind=lambda: trigger_once('X+', press_step, 0, 0))
+button(text='Y-', bind=lambda: trigger_once('Y-', 0, -press_step, 0))
+button(text='Y+', bind=lambda: trigger_once('Y+', 0, press_step, 0))
+button(text='Z-', bind=lambda: trigger_once('Z-', 0, 0, -press_step))
+button(text='Z+', bind=lambda: trigger_once('Z+', 0, 0, press_step))
+button(text='Rot Z-', bind=lambda: trigger_rotation_once('Rot Z-', -rot_step))
+button(text='Rot Z+', bind=lambda: trigger_rotation_once('Rot Z+', rot_step))
+button(text='Reset', bind=lambda: (retour_0_0_0(), clear_pressed()))
+
+
+# release de toutes les actions quand la souris remonte
+scene.bind('mouseup', lambda: clear_pressed())
+
+# -----------------------------------------------------------
+# Boucle principale
+# -----------------------------------------------------------
+retour_0_0_0()
+
+while True:
+    rate(60)
+
+    if pressed['X-']:
+        move(-step, 0, 0)
+    if pressed['X+']:
+        move(step, 0, 0)
+    if pressed['Y-']:
+        move(0, -step, 0)
+    if pressed['Y+']:
+        move(0, step, 0)
+    if pressed['Z-']:
+        move(0, 0, -step)
+    if pressed['Z+']:
+        move(0, 0, step)
+    if pressed['Rot Z-']:
+        rotate_z(-rot_step)
+    if pressed['Rot Z+']:
+        rotate_z(rot_step)
+    if pressed['Reset']:
+        retour_0_0_0()
+        pressed['Reset'] = False
+    else:
+        clear_pressed()
+
+"""
+
+
