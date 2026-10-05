@@ -4,3 +4,5 @@ matplotlib
 Pillow
 scipy
 nicegui
+vpython
+flask
