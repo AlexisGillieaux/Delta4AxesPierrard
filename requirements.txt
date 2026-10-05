@@ -2,4 +2,7 @@ numpy
 sympy
 matplotlib
 Pillow
-serial
+scipy
+nicegui
+vpython
+flask
