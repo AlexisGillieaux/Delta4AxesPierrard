@@ -91,6 +91,9 @@ def DeltaForward(angles):
     -------
     array numpy de shape (n, 3)
         Chaque ligne contient les coordonnées [x, y, z] de la plateforme
+        (solution avec la plateforme sous les moteurs). Une ligne vaut NaN si les
+        angles ne correspondent à aucune position (les barres ne peuvent pas se
+        fermer sur la plateforme).
     """
     np_angles = np.atleast_2d(np.array(angles, dtype=float))
 
@@ -116,87 +119,86 @@ def DeltaForward(angles):
         A2 = np.column_stack(((np.sqrt(3)/2)*(wB + L*np.cos(t2_rad))-sP/2, (1/2)*(wB + L*np.cos(t2_rad))-wP, -L*np.sin(t2_rad)))
         A3 = np.column_stack((-(np.sqrt(3)/2)*(wB + L*np.cos(t3_rad))+sP/2, (1/2)*(wB + L*np.cos(t3_rad))-wP, -L*np.sin(t3_rad)))
         
-        a11 = 2*(A3[:,0] - A1[:,0])
-        a12 = 2*(A3[:,1] - A1[:,1])
-        a13 = 2*(A3[:,2] - A1[:,2])
-        a21 = 2*(A3[:,0] - A2[:,0])
-        a22 = 2*(A3[:,1] - A2[:,1])
-        a23 = 2*(A3[:,2] - A2[:,2])
-        
-        b1 = l**2 - l**2 - A1[:,0]**2 - A1[:,1]**2 - A1[:,2]**2 + A3[:,0]**2 + A3[:,1]**2 + A3[:,2]**2
-        b2 = l**2 - l**2 - A2[:,0]**2 - A2[:,1]**2 - A2[:,2]**2 + A3[:,0]**2 + A3[:,1]**2 + A3[:,2]**2
-        
-        # Créer des masques pour cas singulier et normal
-        a1_test = np.where((np.abs(a13) > 1e-10) & (np.abs(a23) > 1e-10),a11/np.where(np.abs(a13)>1e-10, a13, 1) - a21/np.where(np.abs(a23)>1e-10, a23, 1),np.zeros_like(a13))
-        singular_mask = (np.abs(a13) < 1e-10) | (np.abs(a23) < 1e-10) | (np.abs(a1_test) < 1e-10)
-        normal_mask = ~singular_mask
-        
-        n = len(np_angles)
-        x = np.full(n, np.nan)
-        y = np.full(n, np.nan)
-        z = np.full(n, np.nan)
-        
-        # Traiter cas singulier
-        if np.any(singular_mask):
-            idx = np.where(singular_mask)[0]
-            
-            aS = a11[idx]
-            bS = a12[idx]
-            cS = l**2 - l**2 - A1[idx,0]**2 - A1[idx,1]**2 + A3[idx,0]**2 + A3[idx,1]**2
-            dS = a21[idx]
-            eS = a22[idx]
-            fS = l**2 - l**2 - A2[idx,0]**2 - A2[idx,1]**2 + A3[idx,0]**2 + A3[idx,1]**2
-            
-            x[idx] = (cS*eS - fS*bS) / (aS*eS - dS*bS)
-            y[idx] = (aS*fS - dS*cS) / (aS*eS - dS*bS)
-            
-            B = -2*A1[idx,2]
-            C = A1[idx,2]**2 - l**2 + (x[idx]-A1[idx,0])**2 + (y[idx]-A1[idx,1])**2
-            disc_s = B**2 - 4*C
-            valid_s = disc_s >= 0
-            zplus  = np.where(valid_s, (-B + np.sqrt(np.maximum(disc_s, 0))) / 2, np.nan)
-            zminus = np.where(valid_s, (-B - np.sqrt(np.maximum(disc_s, 0))) / 2, np.nan)
+        # Les trois sphères de rayon l centrées sur A1, A2 et A3 se coupent en deux
+        # points, symétriques par rapport au plan (A1, A2, A3). On les obtient par
+        # trilatération, dans le repère (ex, ey, ez) lié aux trois centres :
+        #   ex : de A1 vers A2,  ey : dans le plan des centres, perpendiculaire à ex,
+        #   ez : normale au plan.
+        # Aucune division par une différence de hauteur des centres : la méthode est
+        # valable pour toutes les configurations, y compris quand deux moteurs (plans
+        # de symétrie du robot) ou les trois ont le même angle.
+        # Si les sphères ne se coupent pas (ou si les centres sont alignés), le
+        # résultat est NaN.
+        with np.errstate(invalid="ignore", divide="ignore"):
+            v12 = A2 - A1
+            v13 = A3 - A1
+            d = np.linalg.norm(v12, axis=1)                    # |A1A2|
+            ex = v12 / d[:, None]
+            i = np.sum(ex * v13, axis=1)                       # composante de A1A3 sur ex
+            ey = v13 - i[:, None] * ex
+            j = np.linalg.norm(ey, axis=1)                     # composante de A1A3 sur ey
+            ey = ey / j[:, None]
+            ez = np.cross(ex, ey)
 
-            
-            # Choisir zplus si négatif, sinon zminus
-            mask_zplus = zplus < 0
-            z[idx[mask_zplus]] = zplus[mask_zplus]
-            z[idx[~mask_zplus]] = zminus[~mask_zplus]
-        
-        # Traiter cas normal
-        if np.any(normal_mask):
-            idx = np.where(normal_mask)[0]
-            
-            a1 = a11[idx]/a13[idx] - a21[idx]/a23[idx]
-            a2 = a12[idx]/a13[idx] - a22[idx]/a23[idx]
-            a3 = b2[idx]/a23[idx] - b1[idx]/a13[idx]
-            a4 = -a2/a1
-            a5 = -a3/a1
-            a6 = (-a21[idx]*a4 - a22[idx])/a23[idx]
-            a7 = (b2[idx] - a21[idx]*a5)/a23[idx]
-            
-            aa = a4**2 + 1 + a6**2
-            bb = 2*a4*(a5 - A1[idx,0]) - 2*A1[idx,1] + 2*a6*(a7 - A1[idx,2])
-            cc = a5*(a5 - 2*A1[idx,0]) + a7*(a7 - 2*A1[idx,2]) + A1[idx,0]**2 + A1[idx,1]**2 + A1[idx,2]**2 - l**2
-            
-            yplus = (-bb + np.sqrt(bb**2 - 4*aa*cc)) / (2*aa)
-            yminus = (-bb - np.sqrt(bb**2 - 4*aa*cc)) / (2*aa)
-            xplus = a4*yplus + a5
-            zplus = a6*yplus + a7
-            xminus = a4*yminus + a5
-            zminus = a6*yminus + a7
-            
-            # Choisir la solution avec z négatif (plateforme en dessous des moteurs)
-            mask_zplus = zplus < 0
-            x[idx[mask_zplus]] = xplus[mask_zplus]
-            y[idx[mask_zplus]] = yplus[mask_zplus]
-            z[idx[mask_zplus]] = zplus[mask_zplus]
-            
-            x[idx[~mask_zplus]] = xminus[~mask_zplus]
-            y[idx[~mask_zplus]] = yminus[~mask_zplus]
-            z[idx[~mask_zplus]] = zminus[~mask_zplus]
-        
-        return np.column_stack((x, y, z))
+            # Dans ce repère, A1 = (0, 0), A2 = (d, 0), A3 = (i, j)
+            xl = d / 2.0
+            yl = (i**2 + j**2 - 2.0*i*xl) / (2.0*j)
+            zl = np.sqrt(l**2 - xl**2 - yl**2)                 # NaN si pas d'intersection
+
+            base_pts = A1 + xl[:, None]*ex + yl[:, None]*ey
+            p_plus = base_pts + zl[:, None]*ez
+            p_moins = base_pts - zl[:, None]*ez
+
+        # Choisir la solution avec z le plus bas (plateforme en dessous des moteurs)
+        mask_plus = p_plus[:, 2] < p_moins[:, 2]
+        return np.where(mask_plus[:, None], p_plus, p_moins)
+
+def test_aller_retour(tolerance_mm=1e-6, n_points=2000, graine=0):
+    """Vérifie que DeltaForward(DeltaInverse(P)) redonne P, sans rien afficher d'autre que le bilan.
+
+    Les poses testées sont : des points quelconques, puis des points sur les trois
+    plans de symétrie du robot (deux moteurs ont le même angle) et sur l'axe
+    vertical (les trois moteurs ont le même angle). Ce sont les cas où la
+    cinématique directe a déjà été fausse (erreurs de plusieurs dizaines de mm).
+
+    Parametres:
+    -----------
+    tolerance_mm : float
+        Erreur maximale acceptée entre la pose de départ et la pose retrouvée
+    n_points : int
+        Nombre de points par famille
+    graine : int
+        Graine du générateur aléatoire
+
+    Retour:
+    -----------
+    float : l'erreur maximale trouvée (mm). Lève AssertionError si elle dépasse tolerance_mm.
+    """
+    rng = np.random.default_rng(graine)
+    y = rng.uniform(-120, 120, n_points)
+    z = rng.uniform(-430, -200, n_points)
+    plan_x0 = np.column_stack((np.zeros(n_points), y, z))      # theta2 = theta3
+
+    familles = {
+        "points quelconques": np.column_stack((rng.uniform(-200, 200, n_points),
+                                               rng.uniform(-200, 200, n_points), z)),
+        "plan theta2 = theta3": plan_x0,
+        "plan theta1 = theta3": np.column_stack(rotate(plan_x0[:, 0], plan_x0[:, 1], 120) + (z,)),
+        "plan theta1 = theta2": np.column_stack(rotate(plan_x0[:, 0], plan_x0[:, 1], -120) + (z,)),
+        "axe vertical": np.column_stack((np.zeros(n_points), np.zeros(n_points), z)),
+    }
+
+    pire = 0.0
+    for nom, poses in familles.items():
+        angles = DeltaInverse(poses)
+        atteignables = ~np.isnan(angles).any(axis=1)
+        erreurs = np.linalg.norm(DeltaForward(angles[atteignables]) - poses[atteignables], axis=1)
+        erreur_max = float(np.max(erreurs))
+        print(f"{nom:<20} {int(atteignables.sum()):>5} poses atteignables, erreur max = {erreur_max:.2e} mm")
+        pire = max(pire, erreur_max)
+
+    assert pire <= tolerance_mm, f"Aller-retour FK(IK(P)) trop imprécis : {pire:.3e} mm > {tolerance_mm} mm"
+    return pire
 
 def test_forward_inverse():
     """Valide les cas inverse forward simples ainsi que les edges cases en printant les résultats obtenus

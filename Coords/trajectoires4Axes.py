@@ -8,7 +8,9 @@ Conventions
 -----------
 - Pose cartésienne : [x, y, z, rz]  (mm, mm, mm, degrés)
 - Angles moteurs   : [θ1, θ2, θ3, θ4]  (degrés)
-- Une pose à 3 composantes [x, y, z] est acceptée partout : rz vaut alors 0.
+- Les poses de départ et d'arrivée des trajectoires peuvent avoir 3 composantes
+  [x, y, z] : au départ rz vaut alors 0, à l'arrivée rz reste celui du départ
+  (le plateau ne tourne pas).
 
 Modèle du 4ème axe
 ------------------
@@ -21,19 +23,30 @@ Ce modèle est valable que le moteur 4 soit fixé sur la base (arbre télescopiq
 à deux cardans) ou directement sur le plateau.
 """
 
-import sys
+import importlib.util
 from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
 
-# Rendre le dossier racine du projet importable, quel que soit le dossier depuis
-# lequel le script est lancé (sinon « import OLD... » échoue).
+# Dossier racine du projet : le dossier « Output » des images y est créé.
 RACINE_PROJET = Path(__file__).resolve().parent.parent
-if str(RACINE_PROJET) not in sys.path:
-    sys.path.insert(0, str(RACINE_PROJET))
 
-import OLD.DeltaCoord_fixed as d1  # noqa: E402
+# Cinématique du robot (version à jour) : « DeltaCoord_fixed (1).py », à côté de
+# ce script. Son nom (espace et parenthèses) interdit « import » : on charge le
+# fichier par son chemin, ce qui marche quel que soit le dossier de lancement.
+FICHIER_DELTACOORD = Path(__file__).resolve().parent / "DeltaCoord_fixed (1).py"
+
+
+def _charger_module(nom, chemin):
+    """Charge un fichier Python par son chemin et retourne le module."""
+    spec = importlib.util.spec_from_file_location(nom, chemin)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+d1 = _charger_module("DeltaCoord_fixed_v1", FICHIER_DELTACOORD)
 
 
 # ============================================================================
@@ -81,11 +94,11 @@ def axe4_direct(theta4_deg):
     return (np.asarray(theta4_deg, dtype=float) - OFFSET_AXE4) / RAPPORT_AXE4
 
 
-def _pose4(pose):
-    """Retourne une pose [x, y, z, rz] en float. Une pose [x, y, z] reçoit rz = 0."""
+def _pose4(pose, rz_defaut=0.0):
+    """Retourne une pose [x, y, z, rz] en float. Une pose [x, y, z] reçoit rz = rz_defaut."""
     p = np.asarray(pose, dtype=float).reshape(-1)
     if p.size == 3:
-        p = np.append(p, 0.0)
+        p = np.append(p, rz_defaut)
     if p.size != 4:
         raise ValueError(f"Pose attendue [x, y, z, rz] ou [x, y, z], reçu : {pose}")
     return p
@@ -131,14 +144,28 @@ def DeltaForward4(angles):
 def _poses_depart_arrivee(start, end, plus_court_chemin=False):
     """Prépare les poses de départ et d'arrivée.
 
+    Une pose [x, y, z] sans rz reçoit rz = 0 au départ ; à l'arrivée elle garde
+    le rz du départ, le plateau ne tourne donc pas.
+
     Si plus_court_chemin est vrai, la rotation rz de l'arrivée est ramenée à
-    moins de 180° de celle du départ (ex. 170° -> -170° fait +20° et non -340°).
-    À n'activer que si l'outil peut tourner sans limite (pas de câble qui s'enroule).
+    180° au plus de celle du départ (ex. 170° -> -170° fait +20° et non -340°).
+    À exactement 180° d'écart, le sens demandé est conservé (0° -> 180° tourne
+    de +180°, 0° -> -180° de -180°).
+
+    La rz d'arrivée est alors REMPLACÉE par une valeur équivalente modulo 360°
+    (ex. 540° devient 180° si le départ est à 0°) : l'orientation finale du
+    plateau est la même, mais l'angle θ4 final renvoyé diffère de celui qu'on
+    obtiendrait sans cette option. À n'activer que si l'outil peut tourner sans
+    limite (pas de câble qui s'enroule).
     """
     p0 = _pose4(start)
-    p1 = _pose4(end)
+    p1 = _pose4(end, rz_defaut=p0[3])
     if plus_court_chemin:
-        delta_rz = (p1[3] - p0[3] + 180.0) % 360.0 - 180.0
+        ecart_brut = p1[3] - p0[3]
+        delta_rz = (ecart_brut + 180.0) % 360.0 - 180.0
+        # Le modulo donne -180° pour un demi-tour : on rend le sens demandé.
+        if delta_rz <= -180.0 + 1e-9 and ecart_brut > 0.0:
+            delta_rz = 180.0
         p1[3] = p0[3] + delta_rz
     return p0, p1
 
@@ -151,6 +178,31 @@ def _verifier_atteignable(angles, poses):
         raise ValueError(
             f"Pose hors de l'espace de travail : {np.round(poses[i], 2)} "
             f"(point {i} de la trajectoire)"
+        )
+
+
+def _verifier_chemin_articulaire(angles, tolerance_deg=1e-3):
+    """Lève une ValueError si une configuration des bras d'un chemin articulaire est impossible.
+
+    Une trajectoire interpolée dans l'espace articulaire n'est sûre qu'aux
+    extrémités : rien ne garantit que les points intermédiaires correspondent
+    à une pose réelle du robot. Chaque configuration [θ1, θ2, θ3] est donc
+    passée en cinématique directe puis inverse. Elle est refusée si le retour
+    par la cinématique inverse ne redonne pas les mêmes angles (à tolerance_deg
+    près) : pas de solution directe (les barres ne peuvent pas se fermer sur le
+    plateau), autre mode d'assemblage ou configuration singulière.
+    Seuls les 3 moteurs des bras sont concernés : θ4 est indépendant de XYZ.
+    """
+    q = angles[:, :3]
+    xyz = np.asarray(d1.DeltaForward(q)).reshape(-1, 3)
+    retour = np.asarray(d1.DeltaInverse(xyz)).reshape(-1, 3)
+    valides = (np.abs(retour - q) <= tolerance_deg).all(axis=1)    # un NaN compte comme invalide
+    invalides = ~valides
+    if invalides.any():
+        i = int(np.flatnonzero(invalides)[0])
+        raise ValueError(
+            f"Configuration des bras impossible sur le chemin articulaire : "
+            f"angles {np.round(angles[i], 2)} (point {i} de la trajectoire)"
         )
 
 
@@ -218,6 +270,30 @@ def _axe_temps(T, dt):
     return np.linspace(0.0, T, n + 1)
 
 
+def _facteur_ralentissement_bras(angles, T, v_max_deg_s, a_max_deg_s2):
+    """Facteur k >= 1 par lequel il faut ralentir le mouvement pour respecter les
+    limites des moteurs des bras (colonnes 0 à 2 de angles).
+
+    Vitesses et accélérations sont estimées par différences finies sur les
+    échantillons. Ralentir le mouvement d'un facteur k (même trajet, durée × k)
+    divise les vitesses par k et les accélérations par k², d'où :
+        k = max(1, v_mesurée / v_max, sqrt(a_mesurée / a_max))
+    Les bords sont ignorés pour l'accélération : la différence finie y est
+    d'ordre 1 et donne des valeurs parasites.
+    """
+    n = len(angles)
+    if n < 2:
+        return 1.0
+    t = np.linspace(0.0, T, n)
+    v = np.gradient(angles[:, :3], t, axis=0)
+    k_v = np.max(np.abs(v)) / v_max_deg_s
+    k_a = 0.0
+    if n >= 6:
+        a = np.gradient(v, t, axis=0)[2:-2]
+        k_a = np.sqrt(np.max(np.abs(a)) / a_max_deg_s2)
+    return max(1.0, float(k_v), float(k_a))
+
+
 # ============================================================================
 #                      TRAJECTOIRES
 # ============================================================================
@@ -234,6 +310,8 @@ def lineartrajectory(start, end, stepsmm, stepsdeg=1.0, plus_court_chemin=False)
         stepsmm (float): pas maximal en translation (mm)
         stepsdeg (float): pas maximal en rotation du plateau (degrés)
         plus_court_chemin (bool): faire tourner rz par le plus court chemin
+            (180° au plus). Le rz d'arrivée est alors remplacé par un équivalent
+            modulo 360° : voir _poses_depart_arrivee.
 
     Returns:
         numpy.ndarray: poses de shape (n_steps + 1, 4)
@@ -253,12 +331,19 @@ def jointmotangles(start, end, deg_per_step, steps_per_second=1.0, plus_court_ch
     Le moteur qui a le plus grand angle à parcourir avance de deg_per_step par
     pas. Les trois autres ralentissent pour finir en même temps que lui.
 
+    Le chemin est une droite dans l'espace des angles, PAS dans l'espace XYZ :
+    le centre du plateau suit une courbe. Chaque configuration intermédiaire
+    est vérifiée (ValueError si le robot ne peut pas la prendre). Pour une
+    droite en XYZ, utiliser cartesian_trapezoidal_trajectory.
+
     Args:
         start (array-like): pose initiale [x, y, z, rz]
         end (array-like): pose finale [x, y, z, rz]
         deg_per_step (float): déplacement du moteur principal par pas (degrés)
         steps_per_second (float): nombre de pas par seconde
         plus_court_chemin (bool): faire tourner rz par le plus court chemin
+            (180° au plus). Le rz d'arrivée est alors remplacé par un équivalent
+            modulo 360° : voir _poses_depart_arrivee.
 
     Returns:
         tuple:
@@ -279,7 +364,9 @@ def jointmotangles(start, end, deg_per_step, steps_per_second=1.0, plus_court_ch
 
     n_steps = max(1, int(np.ceil(max_delta / abs(deg_per_step))))
     duration_sec = n_steps / steps_per_second
-    return np.linspace(q0, q1, n_steps + 1), duration_sec
+    trajectoire = np.linspace(q0, q1, n_steps + 1)
+    _verifier_chemin_articulaire(trajectoire)
+    return trajectoire, duration_sec
 
 
 def jointmotangles_trapezoidal(start, end, v_max_deg_s, a_max_deg_s2, dt=0.001,
@@ -294,6 +381,13 @@ def jointmotangles_trapezoidal(start, end, v_max_deg_s, a_max_deg_s2, dt=0.001,
     Le moteur 4 a ses propres limites, car ce n'est pas le même moteur que ceux
     des bras.
 
+    Chaque moteur ayant son propre profil, le chemin n'est même pas une droite
+    dans l'espace des angles, et le centre du plateau ne suit pas une droite
+    en XYZ (écarts de plusieurs mm à plusieurs dizaines de mm). Chaque
+    configuration échantillonnée est vérifiée (ValueError si le robot ne peut
+    pas la prendre). Pour une droite en XYZ, utiliser
+    cartesian_trapezoidal_trajectory.
+
     Args:
         start (array-like): pose initiale [x, y, z, rz]
         end (array-like): pose finale [x, y, z, rz]
@@ -305,6 +399,8 @@ def jointmotangles_trapezoidal(start, end, v_max_deg_s, a_max_deg_s2, dt=0.001,
         a_max_axe4_deg_s2 (float): accélération max du moteur 4 (degrés moteur/s²),
             défaut A_MAX_AXE4_DEG_S2
         plus_court_chemin (bool): faire tourner rz par le plus court chemin
+            (180° au plus). Le rz d'arrivée est alors remplacé par un équivalent
+            modulo 360° : voir _poses_depart_arrivee.
 
     Returns:
         tuple:
@@ -338,12 +434,14 @@ def jointmotangles_trapezoidal(start, end, v_max_deg_s, a_max_deg_s2, dt=0.001,
     for i in range(4):
         q_path[:, i] = q0[i] + signes[i] * _profil_trapeze(temps, distances[i], t_total, a_max[i])
 
+    _verifier_chemin_articulaire(q_path)
     return q_path, t_total
 
 
 def cartesian_trapezoidal_trajectory(start, end, v_max_mm_s, a_max_mm_s2, dt=0.001,
                                      v_max_axe4_deg_s=None, a_max_axe4_deg_s2=None,
-                                     plus_court_chemin=False):
+                                     plus_court_chemin=False,
+                                     v_max_deg_s=None, a_max_deg_s2=None):
     """Ligne droite en XYZ et rotation rz synchronisées, avec profil trapézoïdal.
 
     La translation et la rotation partagent le même profil normalisé
@@ -356,6 +454,14 @@ def cartesian_trapezoidal_trajectory(start, end, v_max_mm_s, a_max_mm_s2, dt=0.0
     Les limites de rotation du plateau sont déduites de celles du moteur 4 en
     divisant par RAPPORT_AXE4.
 
+    Les moteurs des bras 1 à 3 ne suivent pas un profil trapézoïdal : leurs
+    vitesses et accélérations dépendent de la position sur la droite. Si
+    v_max_deg_s et a_max_deg_s2 sont donnés, le mouvement est ralenti (même
+    trajet, durée plus longue) jusqu'à ce qu'aucun de ces trois moteurs ne les
+    dépasse, avec une tolérance de 0,1 % (mesure par différences finies au pas
+    dt). Sans ces deux limites, rien ne borne les moteurs des bras : à vérifier
+    soi-même sur le diagramme.
+
     Args:
         start (array-like): pose initiale [x, y, z, rz]
         end (array-like): pose finale [x, y, z, rz]
@@ -367,6 +473,11 @@ def cartesian_trapezoidal_trajectory(start, end, v_max_mm_s, a_max_mm_s2, dt=0.0
         a_max_axe4_deg_s2 (float): accélération max du moteur 4 (degrés moteur/s²),
             défaut A_MAX_AXE4_DEG_S2
         plus_court_chemin (bool): faire tourner rz par le plus court chemin
+            (180° au plus). Le rz d'arrivée est alors remplacé par un équivalent
+            modulo 360° : voir _poses_depart_arrivee.
+        v_max_deg_s (float): vitesse max des moteurs des bras (degrés/s), optionnel
+        a_max_deg_s2 (float): accélération max des moteurs des bras (degrés/s²),
+            optionnel. À donner en même temps que v_max_deg_s.
 
     Returns:
         tuple:
@@ -377,6 +488,11 @@ def cartesian_trapezoidal_trajectory(start, end, v_max_mm_s, a_max_mm_s2, dt=0.0
     a4 = A_MAX_AXE4_DEG_S2 if a_max_axe4_deg_s2 is None else a_max_axe4_deg_s2
     _verifier_limites(v_max_mm_s=v_max_mm_s, a_max_mm_s2=a_max_mm_s2,
                       v_max_axe4_deg_s=v4, a_max_axe4_deg_s2=a4, dt=dt)
+    if (v_max_deg_s is None) != (a_max_deg_s2 is None):
+        raise ValueError("v_max_deg_s et a_max_deg_s2 vont ensemble : donner les deux ou aucun")
+    limiter_bras = v_max_deg_s is not None
+    if limiter_bras:
+        _verifier_limites(v_max_deg_s=v_max_deg_s, a_max_deg_s2=a_max_deg_s2)
 
     p0, p1 = _poses_depart_arrivee(start, end, plus_court_chemin)
     delta = p1 - p0
@@ -398,15 +514,29 @@ def cartesian_trapezoidal_trajectory(start, end, v_max_mm_s, a_max_mm_s2, dt=0.0
         v_lambda = min(v_lambda, (v4 / rapport) / rotation)
         a_lambda = min(a_lambda, (a4 / rapport) / rotation)
 
-    # 2) Profil trapézoïdal de λ entre 0 et 1
-    t_total = float(_temps_min_trapeze(1.0, v_lambda, a_lambda))
-    temps = _axe_temps(t_total, dt)
-    lam = _profil_trapeze(temps, 1.0, t_total, a_lambda)
+    # 2) Profil trapézoïdal de λ entre 0 et 1, puis poses intermédiaires et
+    #    cinématique inverse (vectorisée). Si les bras sont limités, on ralentit
+    #    d'un facteur k (v/k, a/k²) jusqu'à ce que leurs limites soient respectées.
+    #    Le facteur est mesuré sur la trajectoire échantillonnée, donc on itère.
+    k = 1.0
+    for _ in range(10):
+        v_l, a_l = v_lambda / k, a_lambda / k**2
+        t_total = float(_temps_min_trapeze(1.0, v_l, a_l))
+        temps = _axe_temps(t_total, dt)
+        lam = _profil_trapeze(temps, 1.0, t_total, a_l)
 
-    # 3) Poses intermédiaires puis cinématique inverse (vectorisée)
-    poses = p0 + lam[:, np.newaxis] * delta
-    angles = DeltaInverse4(poses)
-    _verifier_atteignable(angles, poses)
+        poses = p0 + lam[:, np.newaxis] * delta
+        angles = DeltaInverse4(poses)
+        _verifier_atteignable(angles, poses)
+
+        if not limiter_bras:
+            break
+        facteur = _facteur_ralentissement_bras(angles, t_total, v_max_deg_s, a_max_deg_s2)
+        if facteur <= 1.001:
+            break
+        k *= facteur
+    else:
+        raise RuntimeError("Limites des moteurs des bras non respectées après 10 itérations")
 
     return angles, t_total
 
@@ -567,7 +697,8 @@ def test(dossier_sortie=None, afficher=True):
     print("=" * 70)
     traj_cart, duree_cart = cartesian_trapezoidal_trajectory(
         [-200, 200, -200, 0], [175, -250, -350, 180],
-        v_max_mm_s=200.0, a_max_mm_s2=500.0, dt=0.01
+        v_max_mm_s=200.0, a_max_mm_s2=500.0, dt=0.01,
+        v_max_deg_s=30.0, a_max_deg_s2=60.0
     )
     resume_trajectoire(traj_cart, duree_cart)
     fig = timediagram(traj_cart, duree_cart,
