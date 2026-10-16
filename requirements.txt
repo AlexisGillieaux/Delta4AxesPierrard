@@ -6,3 +6,4 @@ scipy
 nicegui
 vpython
 flask
+serial

@@ -1,9 +1,34 @@
-from email import generator
-from math import *
+"""
+Cinématique du robot delta (3 bras) : inverse, directe, visualisation et résolution.
+
+Repère : x, y horizontaux, z vertical (négatif sous la base). Angles moteurs en degrés,
+θ = 0 quand le bras moteur est horizontal, positif quand il pointe vers le bas.
+Positions en mm.
+
+Un point hors de portée (cinématique inverse) ou des angles impossibles (cinématique
+directe) donnent NaN. Une forme d'entrée invalide donne aussi [[NaN, NaN, NaN]].
+"""
+
+from math import sqrt
+
 import numpy as np
 
-# Configuration affichage numpy : supprimer la notation scientifique
-np.set_printoptions(suppress=True, precision=9, linewidth=200)
+
+# ============================================================================
+#                      GÉOMÉTRIE DU ROBOT (mm)
+# ============================================================================
+# Une seule définition, utilisée par la cinématique inverse, la cinématique
+# directe et la visualisation.
+
+R_BASE = 200                    # Rayon du cercle sur lequel sont les moteurs
+W_BASE = R_BASE / 2             # Rayon de la base du triangle équilatéral formé par les moteurs
+S_BASE = R_BASE * 3 / sqrt(3)   # Côté du triangle équilatéral inscrit dans ce cercle
+R_PLAT = 40                     # Rayon de la plateforme (distance du centre à un point d'attache)
+W_PLAT = R_PLAT / 2             # Rayon de la base du triangle équilatéral formé par les points d'attache
+S_PLAT = R_PLAT * 3 / sqrt(3)   # Côté du triangle équilatéral inscrit dans le cercle de la plateforme
+L_BRAS = 200                    # Longueur des bras moteurs
+L_BARRE = 430                   # Longueur des bras parallèles (extrémité du bras moteur -> point d'attache)
+
 
 def rotate(x, y, angle_deg):
     """Rotation compatible avec arrays numpy et scalaires"""
@@ -12,241 +37,240 @@ def rotate(x, y, angle_deg):
 
 def solve_one_arm(xr, yr, z, wB, rP, L, l):
     """Résout pour un bras dont la direction est l'axe Y local
-    Fonctionne avec des scalaires et arrays numpy"""
+    Fonctionne avec des scalaires et arrays numpy. Retourne NaN si le point est hors de portée.
+
+    Si G = E, tan(θ/2) est infini : θ vaut ±180° ou NaN, hors de toute plage physique."""
+    xr, yr, z = (np.asarray(v, dtype=float) for v in (xr, yr, z))
     a = wB - rP
     E = 2*L*(yr + a)
     F = 2*L*z
     G = xr**2 + yr**2 + z**2 + a**2 + L**2 + 2*a*yr - l**2
     disc = E**2 + F**2 - G**2
-    
-    mask_disc_neg = disc < 0
-    mask_disc_pos = ~mask_disc_neg
-    t_minus = np.zeros_like(xr)
-    t_minus[mask_disc_neg] =  np.nan  
-    t_minus[mask_disc_pos] = (-F[mask_disc_pos] - np.sqrt(disc[mask_disc_pos])) / (G[mask_disc_pos] - E[mask_disc_pos])
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        t_minus = (-F - np.sqrt(disc)) / (G - E)
+    t_minus = np.where(disc < 0, np.nan, t_minus)
     return np.degrees(2*np.arctan(t_minus))
-    
-    
+
 
 def DeltaInverse(coordinates):
     """
     Calcule l'inverse cinématique pour un robot Delta.
-    
+
     Paramètres:
     -----------
     coordinates : array numpy de shape (n, 3)
         Chaque ligne contient les coordonnées [x, y, z] d'un point
-    
+
     Retour:
     -------
     array numpy de shape (n, 3)
-        Chaque ligne contient les angles [t1, t2, t3] des trois moteurs
+        Chaque ligne contient les angles [t1, t2, t3] des trois moteurs.
+        Une ligne vaut NaN si le point est hors de portée. Si la forme de
+        coordinates est invalide, retourne [[NaN, NaN, NaN]].
     """
     # Convertir en array numpy si nécessaire
     coords = np.atleast_2d(np.array(coordinates, dtype=float))
-    
+
     # Vérifier la forme
     if (coords.ndim != 2) | (coords.shape[1] != 3):
         return np.array([[np.nan, np.nan, np.nan]])
-    else:
-    
-        # Paramètres du robot
-        rB = 200    # Rayon du cercle sur lequel sont les moteurs
-        wB = rB/2               # Rayon de la base du triangle équilatéral formé par les moteurs
-        rP = 40                 # Rayon de la plateforme (distance du centre à un point d'attache)
-        L = 200                 # Longueur des bras moteurs
-        l = 430                 # Longueur des bras parallèles
-        
-        x = coords[:, 0]
-        y = coords[:, 1]
-        z = coords[:, 2]
-        
-        # Bras 1 : pas de rotation
-        x1, y1 = rotate(x, y, 0)
-        t1 = solve_one_arm(x1, y1, z, wB, rP, L, l)
-        
-        # Bras 2 : rotation de -120°
-        x2, y2 = rotate(x, y, -120)
-        t2 = solve_one_arm(x2, y2, z, wB, rP, L, l)
-        
-        # Bras 3 : rotation de +120°
-        x3, y3 = rotate(x, y, 120)
-        t3 = solve_one_arm(x3, y3, z, wB, rP, L, l)
-        
-        # Retourner un array de shape (n, 3)
-        return np.column_stack((t1, t2, t3))
+
+    x = coords[:, 0]
+    y = coords[:, 1]
+    z = coords[:, 2]
+
+    # Bras 1 : pas de rotation
+    x1, y1 = rotate(x, y, 0)
+    t1 = solve_one_arm(x1, y1, z, W_BASE, R_PLAT, L_BRAS, L_BARRE)
+
+    # Bras 2 : rotation de -120°
+    x2, y2 = rotate(x, y, -120)
+    t2 = solve_one_arm(x2, y2, z, W_BASE, R_PLAT, L_BRAS, L_BARRE)
+
+    # Bras 3 : rotation de +120°
+    x3, y3 = rotate(x, y, 120)
+    t3 = solve_one_arm(x3, y3, z, W_BASE, R_PLAT, L_BRAS, L_BARRE)
+
+    # Retourner un array de shape (n, 3)
+    return np.column_stack((t1, t2, t3))
 
 
 def DeltaForward(angles):
     """
     Calcule la cinématique directe pour un robot Delta.
     Fonctionne complètement vectorisé avec les arrays numpy.
-    
+
     Paramètres:
     -----------
     angles : array numpy de shape (n, 3)
         Chaque ligne contient les angles [t1, t2, t3] des trois moteurs (en degrés)
-    
+
     Retour:
     -------
     array numpy de shape (n, 3)
         Chaque ligne contient les coordonnées [x, y, z] de la plateforme
+        (solution avec la plateforme sous les moteurs). Une ligne vaut NaN si les
+        angles ne correspondent à aucune position (les barres ne peuvent pas se
+        fermer sur la plateforme). Si la forme de angles est invalide, retourne
+        [[NaN, NaN, NaN]].
     """
     np_angles = np.atleast_2d(np.array(angles, dtype=float))
 
     # Vérifier la forme
     if (np_angles.ndim != 2) | (np_angles.shape[1] != 3):
         return np.array([[np.nan, np.nan, np.nan]])
-    
-    
-    else:
-        rP = 40              # Rayon de la plateforme (distance du centre à un point d'attache)
-        rB = 200              # Rayon du cercle sur lequel sont les moteurs
-        wP = rP/2               # Rayon de la base du triangle équilatéral formé par les points d'attache sur la plateforme
-        wB = rB/2               # Rayon de la base du triangle équilatéral formé par les moteurs
-        sP = rP*3/sqrt(3)       # Rayon du cercle sur lequel sont les points d'attache sur la plateforme
-        sB = rB*3/sqrt(3)       # Rayon du cercle sur lequel sont les moteurs
-        L = 200                 # Longueur des bras moteurs
-        l = 430                 # Longueur des bras parallèles (entre les points d'attache sur la plateforme et les extrémités des bras moteurs)
-        t1_rad = np.radians(np_angles[:, 0])
-        t2_rad = np.radians(np_angles[:, 1])
-        t3_rad = np.radians(np_angles[:, 2])
-        
-        A1 = np.column_stack((np.zeros_like(t1_rad), -wB - L*np.cos(t1_rad)+rP, -L*np.sin(t1_rad)))
-        A2 = np.column_stack(((np.sqrt(3)/2)*(wB + L*np.cos(t2_rad))-sP/2, (1/2)*(wB + L*np.cos(t2_rad))-wP, -L*np.sin(t2_rad)))
-        A3 = np.column_stack((-(np.sqrt(3)/2)*(wB + L*np.cos(t3_rad))+sP/2, (1/2)*(wB + L*np.cos(t3_rad))-wP, -L*np.sin(t3_rad)))
-        
-        a11 = 2*(A3[:,0] - A1[:,0])
-        a12 = 2*(A3[:,1] - A1[:,1])
-        a13 = 2*(A3[:,2] - A1[:,2])
-        a21 = 2*(A3[:,0] - A2[:,0])
-        a22 = 2*(A3[:,1] - A2[:,1])
-        a23 = 2*(A3[:,2] - A2[:,2])
-        
-        b1 = l**2 - l**2 - A1[:,0]**2 - A1[:,1]**2 - A1[:,2]**2 + A3[:,0]**2 + A3[:,1]**2 + A3[:,2]**2
-        b2 = l**2 - l**2 - A2[:,0]**2 - A2[:,1]**2 - A2[:,2]**2 + A3[:,0]**2 + A3[:,1]**2 + A3[:,2]**2
-        
-        # Créer des masques pour cas singulier et normal
-        a1_test = np.where((np.abs(a13) > 1e-10) & (np.abs(a23) > 1e-10),a11/np.where(np.abs(a13)>1e-10, a13, 1) - a21/np.where(np.abs(a23)>1e-10, a23, 1),np.zeros_like(a13))
-        singular_mask = (np.abs(a13) < 1e-10) | (np.abs(a23) < 1e-10) | (np.abs(a1_test) < 1e-10)
-        normal_mask = ~singular_mask
-        
-        n = len(np_angles)
-        x = np.full(n, np.nan)
-        y = np.full(n, np.nan)
-        z = np.full(n, np.nan)
-        
-        # Traiter cas singulier
-        if np.any(singular_mask):
-            idx = np.where(singular_mask)[0]
-            
-            aS = a11[idx]
-            bS = a12[idx]
-            cS = l**2 - l**2 - A1[idx,0]**2 - A1[idx,1]**2 + A3[idx,0]**2 + A3[idx,1]**2
-            dS = a21[idx]
-            eS = a22[idx]
-            fS = l**2 - l**2 - A2[idx,0]**2 - A2[idx,1]**2 + A3[idx,0]**2 + A3[idx,1]**2
-            
-            x[idx] = (cS*eS - fS*bS) / (aS*eS - dS*bS)
-            y[idx] = (aS*fS - dS*cS) / (aS*eS - dS*bS)
-            
-            B = -2*A1[idx,2]
-            C = A1[idx,2]**2 - l**2 + (x[idx]-A1[idx,0])**2 + (y[idx]-A1[idx,1])**2
-            disc_s = B**2 - 4*C
-            valid_s = disc_s >= 0
-            zplus  = np.where(valid_s, (-B + np.sqrt(np.maximum(disc_s, 0))) / 2, np.nan)
-            zminus = np.where(valid_s, (-B - np.sqrt(np.maximum(disc_s, 0))) / 2, np.nan)
 
-            
-            # Choisir zplus si négatif, sinon zminus
-            mask_zplus = zplus < 0
-            z[idx[mask_zplus]] = zplus[mask_zplus]
-            z[idx[~mask_zplus]] = zminus[~mask_zplus]
-        
-        # Traiter cas normal
-        if np.any(normal_mask):
-            idx = np.where(normal_mask)[0]
-            
-            a1 = a11[idx]/a13[idx] - a21[idx]/a23[idx]
-            a2 = a12[idx]/a13[idx] - a22[idx]/a23[idx]
-            a3 = b2[idx]/a23[idx] - b1[idx]/a13[idx]
-            a4 = -a2/a1
-            a5 = -a3/a1
-            a6 = (-a21[idx]*a4 - a22[idx])/a23[idx]
-            a7 = (b2[idx] - a21[idx]*a5)/a23[idx]
-            
-            aa = a4**2 + 1 + a6**2
-            bb = 2*a4*(a5 - A1[idx,0]) - 2*A1[idx,1] + 2*a6*(a7 - A1[idx,2])
-            cc = a5*(a5 - 2*A1[idx,0]) + a7*(a7 - 2*A1[idx,2]) + A1[idx,0]**2 + A1[idx,1]**2 + A1[idx,2]**2 - l**2
-            
-            yplus = (-bb + np.sqrt(bb**2 - 4*aa*cc)) / (2*aa)
-            yminus = (-bb - np.sqrt(bb**2 - 4*aa*cc)) / (2*aa)
-            xplus = a4*yplus + a5
-            zplus = a6*yplus + a7
-            xminus = a4*yminus + a5
-            zminus = a6*yminus + a7
-            
-            # Choisir la solution avec z négatif (plateforme en dessous des moteurs)
-            mask_zplus = zplus < 0
-            x[idx[mask_zplus]] = xplus[mask_zplus]
-            y[idx[mask_zplus]] = yplus[mask_zplus]
-            z[idx[mask_zplus]] = zplus[mask_zplus]
-            
-            x[idx[~mask_zplus]] = xminus[~mask_zplus]
-            y[idx[~mask_zplus]] = yminus[~mask_zplus]
-            z[idx[~mask_zplus]] = zminus[~mask_zplus]
-        
-        return np.column_stack((x, y, z))
+    t1_rad = np.radians(np_angles[:, 0])
+    t2_rad = np.radians(np_angles[:, 1])
+    t3_rad = np.radians(np_angles[:, 2])
+
+    # Centres des trois sphères : extrémités des bras moteurs, décalées de l'attache
+    # des barres sur la plateforme (le point cherché est à L_BARRE de chacun)
+    A1 = np.column_stack((np.zeros_like(t1_rad), -W_BASE - L_BRAS*np.cos(t1_rad) + R_PLAT, -L_BRAS*np.sin(t1_rad)))
+    A2 = np.column_stack(((sqrt(3)/2)*(W_BASE + L_BRAS*np.cos(t2_rad)) - S_PLAT/2, (1/2)*(W_BASE + L_BRAS*np.cos(t2_rad)) - W_PLAT, -L_BRAS*np.sin(t2_rad)))
+    A3 = np.column_stack((-(sqrt(3)/2)*(W_BASE + L_BRAS*np.cos(t3_rad)) + S_PLAT/2, (1/2)*(W_BASE + L_BRAS*np.cos(t3_rad)) - W_PLAT, -L_BRAS*np.sin(t3_rad)))
+
+    # Les trois sphères de rayon L_BARRE centrées sur A1, A2 et A3 se coupent en
+    # deux points, symétriques par rapport au plan (A1, A2, A3). On les obtient par
+    # trilatération, dans le repère (ex, ey, ez) lié aux trois centres :
+    #   ex : de A1 vers A2,  ey : dans le plan des centres, perpendiculaire à ex,
+    #   ez : normale au plan.
+    # Aucune division par une différence de hauteur des centres : la méthode est
+    # valable pour toutes les configurations, y compris quand deux moteurs (plans
+    # de symétrie du robot) ou les trois ont le même angle.
+    # Si les sphères ne se coupent pas (ou si les centres sont alignés), le
+    # résultat est NaN.
+    with np.errstate(invalid="ignore", divide="ignore"):
+        v12 = A2 - A1
+        v13 = A3 - A1
+        d = np.linalg.norm(v12, axis=1)                    # |A1A2|
+        ex = v12 / d[:, None]
+        i = np.sum(ex * v13, axis=1)                       # composante de A1A3 sur ex
+        ey = v13 - i[:, None] * ex
+        j = np.linalg.norm(ey, axis=1)                     # composante de A1A3 sur ey
+        ey = ey / j[:, None]
+        ez = np.cross(ex, ey)
+
+        # Dans ce repère, A1 = (0, 0), A2 = (d, 0), A3 = (i, j)
+        xl = d / 2.0
+        yl = (i**2 + j**2 - 2.0*i*xl) / (2.0*j)
+        zl = np.sqrt(L_BARRE**2 - xl**2 - yl**2)           # NaN si pas d'intersection
+
+        base_pts = A1 + xl[:, None]*ex + yl[:, None]*ey
+        p_plus = base_pts + zl[:, None]*ez
+        p_moins = base_pts - zl[:, None]*ez
+
+    # Choisir la solution avec z le plus bas (plateforme en dessous des moteurs)
+    mask_plus = p_plus[:, 2] < p_moins[:, 2]
+    return np.where(mask_plus[:, None], p_plus, p_moins)
+
+
+def test_aller_retour(tolerance_mm=1e-6, n_points=2000, graine=0):
+    """Vérifie que DeltaForward(DeltaInverse(P)) redonne P, sans rien afficher d'autre que le bilan.
+
+    Les poses testées sont : des points quelconques, puis des points sur les trois
+    plans de symétrie du robot (deux moteurs ont le même angle) et sur l'axe
+    vertical (les trois moteurs ont le même angle). Ce sont les cas où la
+    cinématique directe a déjà été fausse (erreurs de plusieurs dizaines de mm).
+
+    Parametres:
+    -----------
+    tolerance_mm : float
+        Erreur maximale acceptée entre la pose de départ et la pose retrouvée
+    n_points : int
+        Nombre de points par famille
+    graine : int
+        Graine du générateur aléatoire
+
+    Retour:
+    -----------
+    float : l'erreur maximale trouvée (mm). Lève AssertionError si elle dépasse tolerance_mm.
+    """
+    rng = np.random.default_rng(graine)
+    y = rng.uniform(-120, 120, n_points)
+    z = rng.uniform(-430, -200, n_points)
+    plan_x0 = np.column_stack((np.zeros(n_points), y, z))      # theta2 = theta3
+
+    familles = {
+        "points quelconques": np.column_stack((rng.uniform(-200, 200, n_points),
+                                               rng.uniform(-200, 200, n_points), z)),
+        "plan theta2 = theta3": plan_x0,
+        "plan theta1 = theta3": np.column_stack(rotate(plan_x0[:, 0], plan_x0[:, 1], 120) + (z,)),
+        "plan theta1 = theta2": np.column_stack(rotate(plan_x0[:, 0], plan_x0[:, 1], -120) + (z,)),
+        "axe vertical": np.column_stack((np.zeros(n_points), np.zeros(n_points), z)),
+    }
+
+    pire = 0.0
+    for nom, poses in familles.items():
+        angles = DeltaInverse(poses)
+        atteignables = ~np.isnan(angles).any(axis=1)
+        erreurs = np.linalg.norm(DeltaForward(angles[atteignables]) - poses[atteignables], axis=1)
+        erreur_max = float(np.max(erreurs))
+        print(f"{nom:<20} {int(atteignables.sum()):>5} poses atteignables, erreur max = {erreur_max:.2e} mm")
+        pire = max(pire, erreur_max)
+
+    assert pire <= tolerance_mm, f"Aller-retour FK(IK(P)) trop imprécis : {pire:.3e} mm > {tolerance_mm} mm"
+    return pire
+
 
 def test_forward_inverse():
-    """Valide les cas inverse forward simples ainsi que les edges cases en printant les résultats obtenus
-    
+    """Valide les cas inverse forward simples ainsi que les edges cases en printant les résultats obtenus.
+
+    Vérifie aussi (assertions) que l'aller-retour cinématique redonne les angles de départ,
+    puis lance test_aller_retour() et ouvre les deux visualisations.
+
     Parramètres:
     -----------
     Void
-    
+
     Retour:
     -----------
     Void
 
     """
-    
+    # Affichage sans notation scientifique, limité à ce test (pas de réglage global de numpy)
+    with np.printoptions(suppress=True, precision=9, linewidth=200):
         # Exemple d'utilisation avec un array unique
-    print("Inverse (single point):", DeltaInverse([[250, 250, -200]]))
-    print("Inverse (single point):", DeltaInverse([[0, 0, -300]]))
+        print("Inverse (single point):", DeltaInverse([[250, 250, -200]]))
+        print("Inverse (single point):", DeltaInverse([[0, 0, -300]]))
 
-    # Exemple d'utilisation avec plusieurs points
-    test_coords = np.array([
-        [250, 250, -200],
-        [0, 0, -300],
-        [0, 0, -342.5],
-        [2500,2500,-2500],
-        [50,50,0]
-    ])
-    print("\nInverse (multiple points):")
-    print(DeltaInverse(test_coords))
-    print("Inverse (erreur format):", DeltaInverse([[0, 0]]))
+        # Exemple d'utilisation avec plusieurs points
+        test_coords = np.array([
+            [250, 250, -200],
+            [0, 0, -300],
+            [0, 0, -342.5],
+            [2500,2500,-2500],
+            [50,50,0]
+        ])
+        print("\nInverse (multiple points):")
+        print(DeltaInverse(test_coords))
+        print("Inverse (erreur format):", DeltaInverse([[0, 0]]))
 
-    # Exemple d'utilisation avec un array unique
-    print("Forward (single angles):", DeltaForward([[78.5, -61.8, 57.4]]))
-    print("Forward (single angles):", DeltaForward([[-13.5, -13.5, -13.5]]))
+        # Exemple d'utilisation avec un array unique
+        print("Forward (single angles):", DeltaForward([[78.5, -61.8, 57.4]]))
+        print("Forward (single angles):", DeltaForward([[-13.5, -13.5, -13.5]]))
 
-    # Exemple d'utilisation avec plusieurs points
-    test_angles = np.array([
-        [78.5, -61.8, 57.4],
-        [-13.5, -13.5, -13.5],
-        [0, 0, 0]
-    ])
-    print("\nForward (multiple angles):")
-    print(DeltaForward(test_angles))
-    print("\nInverse(Forward(test_angles)):")
-    print(DeltaInverse(DeltaForward(test_angles)))
-    print("Forward (erreur format):", DeltaInverse([[0, 0]]))
-    
+        # Exemple d'utilisation avec plusieurs points
+        test_angles = np.array([
+            [78.5, -61.8, 57.4],
+            [-13.5, -13.5, -13.5],
+            [0, 0, 0]
+        ])
+        print("\nForward (multiple angles):")
+        print(DeltaForward(test_angles))
+        print("\nInverse(Forward(test_angles)):")
+        retour = DeltaInverse(DeltaForward(test_angles))
+        print(retour)
+        assert np.allclose(retour, test_angles, atol=1e-6), "Inverse(Forward(angles)) ne redonne pas les angles"
+        print("Forward (erreur format):", DeltaForward([[0, 0]]))
 
-    visualisation(angles= test_angles[0])
-    
-    visualisation(position = DeltaForward(test_angles[0]))
+    print("\nAller-retour sur les plans de symétrie :")
+    test_aller_retour()
+
+    visualisation(angles=test_angles[0])
+
+    visualisation(position=DeltaForward(test_angles[0])[0])
 
 
 def visualisation(position=None, angles=None, ax=None, show_plot=True):
@@ -269,22 +293,12 @@ def visualisation(position=None, angles=None, ax=None, show_plot=True):
     Si aucun n'est fourni, utilise une position par défaut.
     """
     import matplotlib.pyplot as plt
-    from mpl_toolkits.mplot3d import Axes3D
-
-    # Paramètres du robot
-    rB = 200    # Rayon du cercle sur lequel sont les moteurs
-    wB = rB/2   # Rayon de la base du triangle équilatéral formé par les moteurs
-    rP = 40     # Rayon de la plateforme (distance du centre à un point d'attache)
-    wP = rP/2   # Rayon de la base du triangle équilatéral formé par les points d'attache
-    sP = rP*3/sqrt(3)  # Rayon du cercle sur lequel sont les points d'attache sur la plateforme
-    sB = rB*3/sqrt(3)  # Rayon du cercle sur lequel sont les moteurs
-    L = 200     # Longueur des bras moteurs
-    l = 430     # Longueur des bras parallèles
+    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401  (enregistre la projection '3d' des anciennes versions)
 
     # Calculer angles et position
     if position is not None:
         angles_calc = DeltaInverse([position])[0]
-        print(f"Angles calculés pour position {position}: θ1={angles_calc[0]:.2f}°, θ2={angles_calc[1]:.2f}°, θ3={angles_calc[2]:.2f}°")
+        print(f"Angles calculés pour position {position}: theta1={angles_calc[0]:.2f}°, theta2={angles_calc[1]:.2f}°, theta3={angles_calc[2]:.2f}°")
         if np.isnan(angles_calc[0]):
             print("Position hors de portée du robot")
             return
@@ -313,32 +327,32 @@ def visualisation(position=None, angles=None, ax=None, show_plot=True):
 
     # Positions des moteurs (base fixe)
     # Le bras 1 pointe dans la direction -Y ; les bras 2 et 3 sont tournés de +120° et +240°.
-    motor1 = (0, -wB, 0)
-    motor2 = ( wB*sqrt(3)/2,  wB/2, 0)   # rotate((0,-wB,0), +120°)
-    motor3 = (-wB*sqrt(3)/2,  wB/2, 0)   # rotate((0,-wB,0), +240°)
+    motor1 = (0, -W_BASE, 0)
+    motor2 = ( W_BASE*sqrt(3)/2,  W_BASE/2, 0)   # rotate((0,-wB,0), +120°)
+    motor3 = (-W_BASE*sqrt(3)/2,  W_BASE/2, 0)   # rotate((0,-wB,0), +240°)
 
-    base1 = (sB/2,  wB, 0)
-    base2 = (-sB/2, wB, 0)
-    base3 = (0, -rB, 0)
+    base1 = (S_BASE/2,  W_BASE, 0)
+    base2 = (-S_BASE/2, W_BASE, 0)
+    base3 = (0, -R_BASE, 0)
 
     # Positions des extrémités des bras moteurs
     # Pour le bras i, le coude est à : motor_i + L*(0, -cos(θ_i), -sin(θ_i)) dans le repère local,
     # ce qui donne après rotation par +k*120° :
     arm1_end = (0,
-                -wB - L*np.cos(np.radians(theta1)),
-                -L*np.sin(np.radians(theta1)))
-    arm2_end = ( (wB + L*np.cos(np.radians(theta2)))*sqrt(3)/2,
-                 (wB + L*np.cos(np.radians(theta2)))/2,
-                -L*np.sin(np.radians(theta2)))
-    arm3_end = (-(wB + L*np.cos(np.radians(theta3)))*sqrt(3)/2,
-                 (wB + L*np.cos(np.radians(theta3)))/2,
-                -L*np.sin(np.radians(theta3)))
+                -W_BASE - L_BRAS*np.cos(np.radians(theta1)),
+                -L_BRAS*np.sin(np.radians(theta1)))
+    arm2_end = ( (W_BASE + L_BRAS*np.cos(np.radians(theta2)))*sqrt(3)/2,
+                 (W_BASE + L_BRAS*np.cos(np.radians(theta2)))/2,
+                -L_BRAS*np.sin(np.radians(theta2)))
+    arm3_end = (-(W_BASE + L_BRAS*np.cos(np.radians(theta3)))*sqrt(3)/2,
+                 (W_BASE + L_BRAS*np.cos(np.radians(theta3)))/2,
+                -L_BRAS*np.sin(np.radians(theta3)))
 
     # Positions des points d'attache sur la plateforme outil
     # Le point d'attache du bras 1 est décalé de -rP selon Y (même convention que -Y pour le bras 1).
-    platform1 = (x0,               y0 - rP,      z0)
-    platform2 = (x0 + rP*sqrt(3)/2, y0 + rP/2,  z0)   # rotate((0,-rP), +120°) + centre
-    platform3 = (x0 - rP*sqrt(3)/2, y0 + rP/2,  z0)   # rotate((0,-rP), +240°) + centre
+    platform1 = (x0,                       y0 - R_PLAT,    z0)
+    platform2 = (x0 + R_PLAT*sqrt(3)/2,    y0 + R_PLAT/2,  z0)   # rotate((0,-rP), +120°) + centre
+    platform3 = (x0 - R_PLAT*sqrt(3)/2,    y0 + R_PLAT/2,  z0)   # rotate((0,-rP), +240°) + centre
 
     # Tracer la base fixe (plateforme supérieure)
     base_points = np.array([base1, base2, base3, base1])
@@ -389,12 +403,11 @@ def visualisation(position=None, angles=None, ax=None, show_plot=True):
     ax.set_xlabel('X (mm)')
     ax.set_ylabel('Y (mm)')
     ax.set_zlabel('Z (mm)')
-    ax.set_title('.1f'
-                 '.1f')
+    ax.set_title(f"Robot Delta : plateforme en ({x0:.1f}, {y0:.1f}, {z0:.1f}) mm\n"
+                 f"angles moteurs ({theta1:.1f}°, {theta2:.1f}°, {theta3:.1f}°)")
 
     # Ajuster les limites pour une meilleure visualisation
     all_points = np.vstack([base_points, platform_points])
-    max_range = max(np.ptp(all_points[:, 0]), np.ptp(all_points[:, 1]), np.ptp(all_points[:, 2]))
 
     ax.set_xlim([np.min(all_points[:, 0]) - 50, np.max(all_points[:, 0]) + 50])
     ax.set_ylim([np.min(all_points[:, 1]) - 50, np.max(all_points[:, 1]) + 50])
@@ -412,25 +425,40 @@ def visualisation(position=None, angles=None, ax=None, show_plot=True):
 
     # Afficher les informations
     print(f"Position de la plateforme: x={x0:.2f}, y={y0:.2f}, z={z0:.2f} mm")
-    print(f"Angles des moteurs: θ1={theta1:.2f}°, θ2={theta2:.2f}°, θ3={theta3:.2f}°")
+    print(f"Angles des moteurs: theta1={theta1:.2f}°, theta2={theta2:.2f}°, theta3={theta3:.2f}°")
 
     return fig, ax
 
 
-# Seuil angulaire physique : angles en dehors de cette plage = elbow down ou singularité
+# ============================================================================
+#                      RÉSOLUTION DANS L'ESPACE DE TRAVAIL
+# ============================================================================
+
+# Plage angulaire supposée atteignable par les moteurs (degrés ; θ = 0 : bras
+# horizontal). Une configuration hors de cette plage est exclue de l'analyse de
+# résolution. Ce n'est PAS une propriété de la géométrie (la cinématique inverse
+# n'a qu'une seule branche, et elle donne des angles au-delà de ±90° pour les
+# coins de la zone de travail) : à adapter aux butées réelles des moteurs.
 ANGLE_MIN_DEG = -90.0
 ANGLE_MAX_DEG =  90.0
-# Seuil de cohérence : si un pas produit un déplacement supérieur à cette valeur,
-# c'est un saut de branche (elbow up -> elbow down), pas une vraie résolution.
-# Valeur max théorique : L * sin(pas_en_radians) ≈ 200 * sin(0.9°) ≈ 3.1 mm
-# On prend 20 mm comme marge très confortable.
-COHERENCE_THRESHOLD_MM = 20.0
+
+# Les 8 combinaisons de décalages (+/- un demi-pas) appliquées aux 3 moteurs : shape (8, 3)
+_SIGNES_DEMI_PAS = np.array([
+    [ 1.0,  1.0,  1.0],
+    [ 1.0,  1.0, -1.0],
+    [ 1.0, -1.0,  1.0],
+    [ 1.0, -1.0, -1.0],
+    [-1.0,  1.0,  1.0],
+    [-1.0,  1.0, -1.0],
+    [-1.0, -1.0,  1.0],
+    [-1.0, -1.0, -1.0],
+], dtype=float)
 
 
 def _angles_are_physical(angles):
     """
-    Retourne un masque booléen : True si les angles sont dans la plage physique.
-    Filtre les configurations elbow-down et les singularités.
+    Retourne un masque booléen : True si les angles sont dans la plage
+    [ANGLE_MIN_DEG, ANGLE_MAX_DEG]. Un NaN donne False.
 
     Paramètres:
     -----------
@@ -446,27 +474,64 @@ def _angles_are_physical(angles):
     )
 
 
+def _deplacement_max_demi_pas(angles, half_step_deg):
+    """Déplacement cartésien maximal quand les 3 moteurs sont décalés d'un demi-pas.
+
+    Pour chaque configuration, les 8 combinaisons de +/- un demi-pas sur les 3 moteurs
+    sont essayées (pire cas, pas une résolution par moteur). Une combinaison est ignorée
+    si un angle sort de la plage [ANGLE_MIN_DEG, ANGLE_MAX_DEG] ou si DeltaForward donne NaN.
+
+    Paramètres:
+    -----------
+    angles : np.array de shape (k, 3), configurations valides
+    half_step_deg : float, demi-pas des moteurs (degrés)
+
+    Retour:
+    -------
+    np.array de shape (k,) : déplacement maximal en mm, NaN si aucune combinaison n'est valide
+    """
+    nominal_positions = DeltaForward(angles)                                  # (k, 3)
+
+    # Angles perturbés pour les 8 combinaisons : (8, k, 3)
+    perturbed_angles = angles[np.newaxis, :, :] + _SIGNES_DEMI_PAS[:, np.newaxis, :] * half_step_deg
+    perturbed_physical = np.all(
+        (perturbed_angles >= ANGLE_MIN_DEG) & (perturbed_angles <= ANGLE_MAX_DEG),
+        axis=2
+    )                                                                         # (8, k)
+
+    # Toutes les positions perturbées en un seul appel DeltaForward
+    candidate_pos = DeltaForward(perturbed_angles.reshape(-1, 3)).reshape(8, -1, 3)
+    displacements = np.linalg.norm(candidate_pos - nominal_positions[np.newaxis, :, :], axis=2)  # (8, k)
+
+    # -inf : combinaison ignorée, sans passer par nanmax (qui avertit sur les colonnes toutes NaN)
+    ignoree = ~perturbed_physical | np.isnan(displacements)
+    maximum = np.where(ignoree, -np.inf, displacements).max(axis=0)
+    maximum[np.isneginf(maximum)] = np.nan
+    return maximum
+
+
 def resolution_xyz(pas_par_tour, chunk_size=4096):
-    """Détermine la résolution linéaire pour tous les points XYZ dans la zone de travail.
+    """Détermine le déplacement cartésien maximal dû à un demi-pas moteur, pour tous les points XYZ de la zone de travail.
 
-    Pour chaque point valide, on calcule la position nominale via DeltaForward, puis on
-    perturbe chaque moteur d'un demi-pas (±) et on mesure le déplacement cartésien résultant.
-    La résolution maximale sur l'ensemble du workspace est retournée.
+    Pour chaque point, on calcule les angles moteurs (DeltaInverse), puis on décale
+    les 3 moteurs ensemble d'un demi-pas, en + ou en - (8 combinaisons), et on mesure
+    le déplacement de la plateforme avec DeltaForward. C'est un pire cas, pas une
+    résolution par moteur. La grille va de -250 à 250 en x et y et de -450 à -150 en z,
+    avec un pas de 1 mm.
 
-    Corrections appliquées par rapport à la version précédente :
-    - Filtre angulaire : seuls les angles dans [-90°, +90°] sont acceptés (elbow-up).
-      Les angles hors plage indiquent une configuration elbow-down ou une singularité.
-    - Filtre de cohérence : les déplacements > COHERENCE_THRESHOLD_MM sont ignorés.
-      Ils indiquent un saut de branche (elbow-up → elbow-down) dû à la perturbation,
-      et non une vraie résolution linéaire.
+    Hypothèses :
+    - pas_par_tour est le nombre de pas par tour de l'articulation du bras elle-même
+      (pas de rapport de réduction supplémentaire) : demi-pas = 180° / pas_par_tour.
+    - Seuls les points dont les 3 angles sont dans [ANGLE_MIN_DEG, ANGLE_MAX_DEG] sont
+      évalués, et les combinaisons de demi-pas qui sortent de cette plage sont ignorées.
 
     Args:
         pas_par_tour (int): nombre de pas par tour des moteurs
         chunk_size (int): nombre de points traités par chunk
 
     Returns:
-        resolutions (np.array): résolutions (mm) pour chaque point valide
-        max_resolution (float): résolution maximale trouvée (mm/pas)
+        resolutions (np.array): déplacement maximal (mm) pour chaque point évalué
+        max_resolution (float): déplacement maximal trouvé (mm)
         max_resolution_position (tuple): position (x, y, z) du pire cas
     """
     pas_par_tour = int(pas_par_tour)
@@ -475,21 +540,11 @@ def resolution_xyz(pas_par_tour, chunk_size=4096):
 
     half_step_deg = (360.0 / pas_par_tour) / 2.0
 
-    sign_combinations = np.array([
-        [ 1.0,  1.0,  1.0],
-        [ 1.0,  1.0, -1.0],
-        [ 1.0, -1.0,  1.0],
-        [ 1.0, -1.0, -1.0],
-        [-1.0,  1.0,  1.0],
-        [-1.0,  1.0, -1.0],
-        [-1.0, -1.0,  1.0],
-        [-1.0, -1.0, -1.0],
-    ], dtype=float)  # shape (8, 3)
-
     x_values = np.arange(-250, 251, 1, dtype=float)
     y_values = np.arange(-250, 251, 1, dtype=float)
     z_values = np.arange(-450, -149, 1, dtype=float)
 
+    # Construction une seule fois du meshgrid XY
     xx, yy = np.meshgrid(x_values, y_values, indexing='xy')
     coords_xy = np.column_stack((xx.ravel(), yy.ravel()))
     n_xy = coords_xy.shape[0]
@@ -504,91 +559,31 @@ def resolution_xyz(pas_par_tour, chunk_size=4096):
         for start in range(0, n_xy, chunk_size):
             stop = min(start + chunk_size, n_xy)
             coords = np.column_stack((coords_xy[start:stop], z_column[start:stop]))
-
             angles = DeltaInverse(coords)
 
-            # --- CORRECTION 1 : filtre NaN + filtre angulaire physique ---
-            # Un angle hors [-90°, 90°] signifie elbow-down : on l'exclut.
-            nan_mask      = ~np.isnan(angles).any(axis=1)
-            physical_mask = _angles_are_physical(angles)
-            valid_mask    = nan_mask & physical_mask
-
+            # Points atteignables ET dont les 3 angles sont dans la plage supposée
+            valid_mask = ~np.isnan(angles).any(axis=1) & _angles_are_physical(angles)
             if not np.any(valid_mask):
                 continue
 
-            valid_angles      = angles[valid_mask]           # (k, 3)
-            nominal_positions = DeltaForward(valid_angles)   # (k, 3)
+            max_displacements = _deplacement_max_demi_pas(angles[valid_mask], half_step_deg)
+            utilisables = ~np.isnan(max_displacements)
+            if not np.any(utilisables):
+                continue
 
-            # Positions perturbées pour les 8 combinaisons de signes : (8, k, 3)
-            perturbed_angles = (
-                valid_angles[np.newaxis, :, :]               # (1, k, 3)
-                + sign_combinations[:, np.newaxis, :]        # (8, 1, 3)
-                * half_step_deg
-            )  # → (8, k, 3)
+            resultats = max_displacements[utilisables]
+            meilleur = int(np.argmax(resultats))
+            if resultats[meilleur] > max_resolution:
+                max_resolution = float(resultats[meilleur])
+                # Indice dans coords_xy : décalage du chunk + rang parmi les points valides, puis utilisables
+                indice = start + np.flatnonzero(valid_mask)[np.flatnonzero(utilisables)[meilleur]]
+                max_resolution_position = (
+                    float(coords_xy[indice, 0]),
+                    float(coords_xy[indice, 1]),
+                    float(z)
+                )
 
-            # Vérifier que les angles perturbés restent eux aussi dans la plage physique
-            perturbed_physical = np.all(
-                (perturbed_angles >= ANGLE_MIN_DEG) & (perturbed_angles <= ANGLE_MAX_DEG),
-                axis=2
-            )  # (8, k)
-
-            # Calculer toutes les positions perturbées en un seul appel DeltaForward
-            perturbed_flat    = perturbed_angles.reshape(-1, 3)          # (8k, 3)
-            positions_flat    = DeltaForward(perturbed_flat)             # (8k, 3)
-            candidate_pos     = positions_flat.reshape(8, -1, 3)         # (8, k, 3)
-
-            # Déplacements cartésiens : (8, k)
-            diff         = candidate_pos - nominal_positions[np.newaxis, :, :]
-            displacements = np.linalg.norm(diff, axis=2)                 # (8, k)
-
-            # --- CORRECTION 2 : masquer les sauts de branche ---
-            # Si les angles perturbés sont hors plage physique OU si le déplacement
-            # dépasse le seuil de cohérence → c'est un artefact, pas une résolution.
-            invalid_perturbation = (
-                ~perturbed_physical                          # hors plage angulaire
-                | np.isnan(displacements)                   # NaN dans DeltaForward
-                | (displacements > COHERENCE_THRESHOLD_MM)  # saut de branche
-            )
-            displacements = np.where(invalid_perturbation, np.nan, displacements)
-
-            # Résolution = pire déplacement parmi les 8 perturbations pour chaque point
-            max_displacements = np.nanmax(displacements, axis=0)         # (k,)
-
-            # Ignorer les points où toutes les perturbations sont invalides
-            all_invalid = np.all(invalid_perturbation, axis=0)           # (k,)
-            max_displacements[all_invalid] = np.nan
-
-            valid_results = max_displacements[~np.isnan(max_displacements)]
-            if valid_results.size:
-                local_best_idx   = int(np.argmax(valid_results))
-                local_best_value = float(valid_results[local_best_idx])
-
-                if local_best_value > max_resolution:
-                    max_resolution = local_best_value
-                    # Retrouver l'indice absolu dans coords_xy
-                    valid_indices  = np.flatnonzero(valid_mask)
-                    non_nan_valid  = valid_indices[~np.isnan(max_displacements)]
-                    absolute_idx   = non_nan_valid[local_best_idx]
-                    max_resolution_position = (
-                        float(coords_xy[start + absolute_idx - start, 0])
-                            if absolute_idx < chunk_size
-                            else float(coords_xy[absolute_idx, 0]),
-                        float(coords_xy[min(absolute_idx, n_xy-1), 1]),
-                        float(z)
-                    )
-                    # Version simplifiée et correcte de la position
-                    orig_idx = start + np.flatnonzero(valid_mask)[
-                        np.flatnonzero(~np.isnan(max_displacements))[local_best_idx]
-                    ]
-                    max_resolution_position = (
-                        float(coords_xy[orig_idx, 0]),
-                        float(coords_xy[orig_idx, 1]),
-                        float(z)
-                    )
-
-            resolutions_chunks.append(
-                max_displacements[~np.isnan(max_displacements)].astype(np.float32)
-            )
+            resolutions_chunks.append(resultats.astype(np.float32))
 
     resolutions = np.concatenate(resolutions_chunks) if resolutions_chunks \
                   else np.array([], dtype=np.float32)
@@ -596,10 +591,10 @@ def resolution_xyz(pas_par_tour, chunk_size=4096):
     return resolutions, float(max_resolution), max_resolution_position
 
 
-def visualisation_resolution(pas_par_tour, z_slice=None, chunk_size=4096):
+def visualisation_resolution(pas_par_tour, z_slice=None, chunk_size=4096, show_plot=True):
     """
-    Visualise la carte de résolution linéaire dans le plan XY pour une tranche Z donnée.
-    Permet d'identifier visuellement où les valeurs aberrantes apparaissent.
+    Visualise la carte du déplacement maximal dû à un demi-pas moteur, dans le plan XY
+    pour une tranche Z donnée (même grandeur que resolution_xyz, grille de 2 mm).
 
     Paramètres:
     -----------
@@ -608,170 +603,106 @@ def visualisation_resolution(pas_par_tour, z_slice=None, chunk_size=4096):
     z_slice : float, optionnel
         Hauteur Z à visualiser. Si None, utilise Z = -300 mm (milieu du workspace).
     chunk_size : int
-        Taille des chunks de calcul
+        Conservé pour compatibilité, non utilisé (la tranche est calculée d'un bloc).
+    show_plot : bool
+        Si True, affiche la figure avec plt.show()
 
     Retour:
     -------
-    fig : matplotlib Figure
+    fig : matplotlib Figure, ou None si aucun point de la tranche n'est exploitable
     """
     import matplotlib.pyplot as plt
-    import matplotlib.colors as mcolors
 
     if z_slice is None:
         z_slice = -300.0
 
-    pas_par_tour   = int(pas_par_tour)
-    half_step_deg  = (360.0 / pas_par_tour) / 2.0
-
-    sign_combinations = np.array([
-        [ 1.0,  1.0,  1.0], [ 1.0,  1.0, -1.0],
-        [ 1.0, -1.0,  1.0], [ 1.0, -1.0, -1.0],
-        [-1.0,  1.0,  1.0], [-1.0,  1.0, -1.0],
-        [-1.0, -1.0,  1.0], [-1.0, -1.0, -1.0],
-    ], dtype=float)
+    pas_par_tour = int(pas_par_tour)
+    if pas_par_tour <= 0:
+        raise ValueError(f"pas_par_tour doit être strictement positif (reçu {pas_par_tour})")
+    half_step_deg = (360.0 / pas_par_tour) / 2.0
 
     x_values = np.arange(-250, 251, 2, dtype=float)   # pas de 2mm pour la visu
     y_values = np.arange(-250, 251, 2, dtype=float)
-    xx, yy   = np.meshgrid(x_values, y_values, indexing='xy')
+    xx, yy = np.meshgrid(x_values, y_values, indexing='xy')
     coords_xy = np.column_stack((xx.ravel(), yy.ravel()))
-    n_xy      = coords_xy.shape[0]
+    n_xy = coords_xy.shape[0]
 
-    resolution_map  = np.full(n_xy, np.nan)
-    angle_map       = np.full((n_xy, 3), np.nan)   # pour diagnostiquer
+    coords = np.column_stack((coords_xy, np.full(n_xy, z_slice)))
+    angles = DeltaInverse(coords)
 
-    z_col   = np.full(n_xy, z_slice)
-    coords  = np.column_stack((coords_xy, z_col))
-    angles  = DeltaInverse(coords)
+    atteignable = ~np.isnan(angles).any(axis=1)
+    physique = _angles_are_physical(angles)
+    valid_mask = atteignable & physique
+    hors_plage = atteignable & ~physique        # atteignable, mais au moins un moteur hors plage
 
-    nan_mask      = ~np.isnan(angles).any(axis=1)
-    physical_mask = _angles_are_physical(angles)
-    valid_mask    = nan_mask & physical_mask
-
-    angle_map[valid_mask] = angles[valid_mask]
-
+    resolution_map = np.full(n_xy, np.nan)
+    t1_map = np.full(n_xy, np.nan)              # pour diagnostiquer
     if np.any(valid_mask):
-        valid_angles      = angles[valid_mask]
-        nominal_positions = DeltaForward(valid_angles)
+        resolution_map[valid_mask] = _deplacement_max_demi_pas(angles[valid_mask], half_step_deg)
+        t1_map[valid_mask] = angles[valid_mask, 0]
 
-        perturbed_angles = (
-            valid_angles[np.newaxis, :, :]
-            + sign_combinations[:, np.newaxis, :]
-            * half_step_deg
-        )
-        perturbed_physical = np.all(
-            (perturbed_angles >= ANGLE_MIN_DEG) & (perturbed_angles <= ANGLE_MAX_DEG),
-            axis=2
-        )
+    shape_2d = (len(y_values), len(x_values))
+    res_2d = resolution_map.reshape(shape_2d)
+    t1_2d = t1_map.reshape(shape_2d)
+    hors_plage_2d = hors_plage.reshape(shape_2d)
 
-        perturbed_flat  = perturbed_angles.reshape(-1, 3)
-        positions_flat  = DeltaForward(perturbed_flat)
-        candidate_pos   = positions_flat.reshape(8, -1, 3)
+    if not np.isfinite(res_2d).any():
+        print(f"Aucun point exploitable à Z = {z_slice:.0f} mm")
+        return None
 
-        diff          = candidate_pos - nominal_positions[np.newaxis, :, :]
-        displacements = np.linalg.norm(diff, axis=2)
-
-        invalid = (
-            ~perturbed_physical
-            | np.isnan(displacements)
-            | (displacements > COHERENCE_THRESHOLD_MM)
-        )
-        displacements = np.where(invalid, np.nan, displacements)
-
-        max_disp = np.nanmax(displacements, axis=0)
-        all_inv  = np.all(invalid, axis=0)
-        max_disp[all_inv] = np.nan
-
-        resolution_map[valid_mask] = max_disp
+    etiquette = 'Déplacement max pour ±½ pas\nsur les 3 moteurs (mm)'
+    vmax_95 = float(np.nanpercentile(res_2d, 95))
+    vmax_max = float(np.nanmax(res_2d))
+    extent = [x_values[0], x_values[-1], y_values[0], y_values[-1]]
 
     # ---- Affichage ----
     fig, axes = plt.subplots(1, 3, figsize=(18, 6))
     fig.suptitle(f'Analyse résolution — Z = {z_slice:.0f} mm  |  {pas_par_tour} pas/tour',
                  fontsize=14, fontweight='bold')
 
-    res_2d = resolution_map.reshape(len(y_values), len(x_values))
-
-    # --- Subplot 1 : carte de résolution normale ---
+    # --- Subplot 1 : échelle limitée au 95e percentile (meilleur contraste) ---
     ax1 = axes[0]
-    vmax_normal = np.nanpercentile(res_2d, 95)   # 95e percentile pour ne pas écraser les valeurs normales
-    im1 = ax1.imshow(
-        res_2d, origin='lower',
-        extent=[x_values[0], x_values[-1], y_values[0], y_values[-1]],
-        cmap='viridis', vmin=0, vmax=vmax_normal
-    )
-    plt.colorbar(im1, ax=ax1, label='Résolution (mm/pas)')
-    ax1.set_title('Résolution (échelle normale\njusqu\'au 95e percentile)')
+    im1 = ax1.imshow(res_2d, origin='lower', extent=extent, cmap='viridis', vmin=0, vmax=vmax_95)
+    plt.colorbar(im1, ax=ax1, label=etiquette, extend='max')
+    ax1.set_title('Échelle limitée au 95e percentile\n(au-delà : couleur saturée)')
     ax1.set_xlabel('X (mm)'); ax1.set_ylabel('Y (mm)')
 
-    # --- Subplot 2 : carte de résolution — valeurs aberrantes en rouge ---
+    # --- Subplot 2 : échelle complète, de 0 au maximum réel ---
     ax2 = axes[1]
-    res_display = res_2d.copy()
-    aberrant_mask_2d = res_2d > vmax_normal
-    cmap_custom = plt.cm.viridis.copy()
-    cmap_custom.set_bad('lightgray')
-    im2 = ax2.imshow(
-        np.where(~aberrant_mask_2d, res_display, np.nan),
-        origin='lower',
-        extent=[x_values[0], x_values[-1], y_values[0], y_values[-1]],
-        cmap='viridis', vmin=0, vmax=vmax_normal
-    )
-    # Superposer les valeurs aberrantes en rouge
-    ax2.imshow(
-        np.where(aberrant_mask_2d, 1.0, np.nan),
-        origin='lower',
-        extent=[x_values[0], x_values[-1], y_values[0], y_values[-1]],
-        cmap='Reds', vmin=0, vmax=1, alpha=0.8
-    )
-    ax2.imshow(
-        np.where(np.isnan(res_2d), 1.0, np.nan),
-        origin='lower',
-        extent=[x_values[0], x_values[-1], y_values[0], y_values[-1]],
-        cmap='Greys', vmin=0, vmax=1, alpha=0.4
-    )
-    plt.colorbar(im2, ax=ax2, label='Résolution (mm/pas)')
-    ax2.set_title(f'Rouge = valeurs > {vmax_normal:.2f} mm\n(hors workspace ou saut branche)')
+    im2 = ax2.imshow(res_2d, origin='lower', extent=extent, cmap='viridis', vmin=0, vmax=vmax_max)
+    ax2.imshow(np.where(np.isnan(res_2d), 1.0, np.nan), origin='lower', extent=extent,
+               cmap='Greys', vmin=0, vmax=1, alpha=0.4)
+    plt.colorbar(im2, ax=ax2, label=etiquette)
+    ax2.set_title(f'Échelle complète (maximum {vmax_max:.2f} mm)\nGris = hors portée ou angle hors plage')
     ax2.set_xlabel('X (mm)'); ax2.set_ylabel('Y (mm)')
 
-    # --- Subplot 3 : angle t1 pour comprendre les zones problématiques ---
+    # --- Subplot 3 : angle t1, et points exclus car un moteur est hors plage ---
     ax3 = axes[2]
-    t1_map = angle_map[:, 0].reshape(len(y_values), len(x_values))
-    # Marquer les angles hors plage physique (avant filtrage) en rouge
-    angles_raw     = DeltaInverse(np.column_stack((coords_xy, z_col)))
-    t1_raw         = angles_raw[:, 0].reshape(len(y_values), len(x_values))
-    out_of_range_2d = (t1_raw < ANGLE_MIN_DEG) | (t1_raw > ANGLE_MAX_DEG)
-
-    im3 = ax3.imshow(
-        t1_map, origin='lower',
-        extent=[x_values[0], x_values[-1], y_values[0], y_values[-1]],
-        cmap='RdYlGn', vmin=ANGLE_MIN_DEG, vmax=ANGLE_MAX_DEG
-    )
-    ax3.imshow(
-        np.where(out_of_range_2d, 1.0, np.nan),
-        origin='lower',
-        extent=[x_values[0], x_values[-1], y_values[0], y_values[-1]],
-        cmap='Reds', vmin=0, vmax=1, alpha=0.6
-    )
+    im3 = ax3.imshow(t1_2d, origin='lower', extent=extent,
+                     cmap='RdYlGn', vmin=ANGLE_MIN_DEG, vmax=ANGLE_MAX_DEG)
+    ax3.imshow(np.where(hors_plage_2d, 1.0, np.nan), origin='lower', extent=extent,
+               cmap='Reds', vmin=0, vmax=1, alpha=0.6)
     plt.colorbar(im3, ax=ax3, label='θ1 (degrés)')
-    ax3.set_title(f'Angle θ1 — rouge = hors [{ANGLE_MIN_DEG:.0f}°, {ANGLE_MAX_DEG:.0f}°]\n(elbow-down filtré)')
+    ax3.set_title(f'Angle θ1 — rouge = au moins un moteur hors [{ANGLE_MIN_DEG:.0f}°, {ANGLE_MAX_DEG:.0f}°]\n'
+                  f'(points exclus de l\'analyse)')
     ax3.set_xlabel('X (mm)'); ax3.set_ylabel('Y (mm)')
 
     # Stats
-    valid_res = res_2d[~np.isnan(res_2d) & ~aberrant_mask_2d]
-    n_total   = np.sum(~np.isnan(res_2d))
-    n_aberrant = np.sum(aberrant_mask_2d & ~np.isnan(res_2d))
+    valid_res = res_2d[np.isfinite(res_2d)]
     print(f"\n{'='*55}")
     print(f"  Résolution à Z = {z_slice:.0f} mm  |  {pas_par_tour} pas/tour")
     print(f"{'='*55}")
-    print(f"  Points valides        : {n_total}")
-    print(f"  Valeurs > 95e pct     : {n_aberrant}  ({100*n_aberrant/max(n_total,1):.1f}%)")
-    if valid_res.size:
-        print(f"  Résolution min        : {np.min(valid_res):.3f} mm")
-        print(f"  Résolution médiane    : {np.median(valid_res):.3f} mm")
-        print(f"  Résolution max (filtré): {np.max(valid_res):.3f} mm")
-        print(f"  95e percentile        : {vmax_normal:.3f} mm")
+    print(f"  Points évalués        : {valid_res.size}")
+    print(f"  Points hors plage     : {int(hors_plage.sum())}")
+    print(f"  Résolution min        : {np.min(valid_res):.3f} mm")
+    print(f"  Résolution médiane    : {np.median(valid_res):.3f} mm")
+    print(f"  95e percentile        : {vmax_95:.3f} mm")
+    print(f"  Résolution max        : {vmax_max:.3f} mm")
     print(f"{'='*55}\n")
 
     plt.tight_layout()
-    plt.show()
+    if show_plot:
+        plt.show()
     return fig
 
 
@@ -786,4 +717,4 @@ if __name__ == "__main__":
         print(f"Résolution 95e pct  : {np.percentile(res, 95):.4f} mm")
 
     # # --- Visualisation pour Z = -300 mm ---
-    # visualisation_resolution(pas_par_tour=650, z_slice=-300.0)
+    visualisation_resolution(pas_par_tour=650, z_slice=-300.0)

@@ -1,6 +1,16 @@
-import OLD.DeltaCoord_fixed as d1
+import importlib.util
+from pathlib import Path
+
 import numpy as np
 import matplotlib.pyplot as plt
+
+# Cinématique du robot (version à jour) : « DeltaCoord_fixed (1).py », à côté de ce
+# script. Son nom (espace et parenthèses) interdit « import » : on charge le
+# fichier par son chemin, ce qui marche quel que soit le dossier de lancement.
+_spec = importlib.util.spec_from_file_location(
+    "DeltaCoord_fixed_v1", Path(__file__).resolve().parent / "DeltaCoord_fixed (1).py")
+d1 = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(d1)
 
 def lineartrajectory(start, end, stepsmm):
     steps = int(np.linalg.norm(np.array(end) - np.array(start)) / stepsmm)
