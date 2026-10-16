@@ -12,6 +12,7 @@ void loop() {
     while (Serial1.available() > 0) {
         const int receivedByte = Serial1.read();
         Serial.write(receivedByte);   // Affiche les octets reçus sur le moniteur USB
-        Serial1.write(receivedByte);  // Renvoie les octets au Raspberry Pi (écho de test)
+        int testing = receivedByte+1;  // Stocke l'octet reçu pour un traitement ultérieur si nécessaire
+        Serial1.write(testing);  // Renvoie les octets au Raspberry Pi (écho de test)
     }
 }
