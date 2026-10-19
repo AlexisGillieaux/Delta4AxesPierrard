@@ -25,8 +25,12 @@ Ce projet implémente les algorithmes de cinématique directe/inverse pour un ro
 │   ├── ex2.py                     # Exercice 2
 │   └── traj.ipynb                 # Notebook - trajectoires
 │
-├── Communication/
-│   └── Teensy.cpp                 # Pont série USB ↔ UART (Serial1)
+├── Communication/                 # Liaison Raspberry Pi ↔ Teensy 4.1 (PlatformIO)
+│   ├── platformio.ini             # Configuration Teensy 4.1
+│   ├── src/main.cpp               # Firmware Teensy : écho UART de test (Serial1)
+│   ├── src/Teensy.cpp             # Ancien pont USB ↔ UART (commenté)
+│   ├── commnuciation_rasp.py      # Envoi d'une trajectoire (X, Y, Z, T) en trame binaire
+│   └── rasp_test.py               # Test d'envoi d'un nombre depuis le Raspberry Pi
 │
 ├── Output/                        # Graphiques générés
 │   ├── comparison_linear_vs_trapezoidal.png
@@ -187,15 +191,22 @@ Le notebook `traj.ipynb` contient les trajectoires commentées.
 
 ---
 
-## Communication — Teensy
+## Communication — Raspberry Pi ↔ Teensy
 
-`Communication/Teensy.cpp` relaie les données dans les deux sens entre le port USB (`Serial`) et l'UART matériel (`Serial1`), à **115200 bauds**. Ouvrir le moniteur série USB au même débit puis connecter l'appareil externe aux broches UART du Teensy :
+Le dossier `Communication/` est un projet PlatformIO pour Teensy 4.1. La liaison se fait par UART à **115200 bauds**.
 
-- TX du Teensy (`Serial1`) → RX de l'appareil
-- RX du Teensy (`Serial1`) ← TX de l'appareil
-- GND du Teensy ↔ GND de l'appareil
+- `src/main.cpp` (firmware actif) : chaque octet reçu sur `Serial1` est affiché sur le moniteur USB (`Serial`), puis renvoyé au Raspberry Pi incrémenté de 1 (écho de test).
+- `src/Teensy.cpp` : ancien pont USB ↔ UART, entièrement commenté.
+- `rasp_test.py` : côté Raspberry Pi, envoie un nombre saisi au clavier sur `/dev/serial0`.
+- `commnuciation_rasp.py` : côté Raspberry Pi, envoie une liste de points `(X, Y, Z, T)` en une trame binaire : `0xAA 0xBB`, nombre de points (max 255), 4 floats little-endian par point, checksum (somme des données sur 8 bits), `0xCC 0xDD`.
 
-Les broches correspondent à `Serial1` et dépendent du modèle de Teensy ; vérifier le brochage de la carte et la compatibilité des niveaux logiques avant le branchement.
+Câblage (Teensy 4.1, `Serial1` = RX1 broche 0, TX1 broche 1) :
+
+- TX1 du Teensy → RX du Raspberry Pi
+- RX1 du Teensy ← TX du Raspberry Pi
+- GND du Teensy ↔ GND du Raspberry Pi
+
+Les deux cartes fonctionnent en logique 3,3 V.
 
 ---
 
