@@ -1,4 +1,14 @@
-import OLD.DeltaCoord as d1
+"""Compare linear and trapezoidal joint trajectories."""
+from pathlib import Path
+import sys
+
+# Allow running this file directly from any working directory. OLD and Coords
+# are sibling folders under the project root, so Python needs that root on its
+# module search path to resolve ``OLD.DeltaCoord_fixed`` in trajectoires.py.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 import numpy as np
 import matplotlib.pyplot as plt
 from trajectoires import jointmotangles, jointmotangles_trapezoidal, timediagram

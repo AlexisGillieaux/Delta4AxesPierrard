@@ -25,6 +25,9 @@ Ce projet implémente les algorithmes de cinématique directe/inverse pour un ro
 │   ├── ex2.py                     # Exercice 2
 │   └── traj.ipynb                 # Notebook - trajectoires
 │
+├── Communication/
+│   └── Teensy.cpp                 # Pont série USB ↔ UART (Serial1)
+│
 ├── Output/                        # Graphiques générés
 │   ├── comparison_linear_vs_trapezoidal.png
 │   ├── trajectoire_linéaire.png
@@ -181,6 +184,18 @@ python robotiqueQ1/niryo-inv.py   # Cinématique inverse
 ```
 
 Le notebook `traj.ipynb` contient les trajectoires commentées.
+
+---
+
+## Communication — Teensy
+
+`Communication/Teensy.cpp` relaie les données dans les deux sens entre le port USB (`Serial`) et l'UART matériel (`Serial1`), à **115200 bauds**. Ouvrir le moniteur série USB au même débit puis connecter l'appareil externe aux broches UART du Teensy :
+
+- TX du Teensy (`Serial1`) → RX de l'appareil
+- RX du Teensy (`Serial1`) ← TX de l'appareil
+- GND du Teensy ↔ GND de l'appareil
+
+Les broches correspondent à `Serial1` et dépendent du modèle de Teensy ; vérifier le brochage de la carte et la compatibilité des niveaux logiques avant le branchement.
 
 ---
 
