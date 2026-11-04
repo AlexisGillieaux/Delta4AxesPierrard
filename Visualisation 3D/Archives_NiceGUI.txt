@@ -225,3 +225,1918 @@ update_robot_graphics()
 ui.run(port=8080, title="Robot Delta Simulation")
 
 """
+
+
+"""
+
+-----------------------TEST2-------------
+
+from nicegui import ui
+
+# --- ÉTAT GLOBAL ET CONFIGURATION DU ROBOT ---
+
+robot_state = {
+    "x": 0.0,
+    "y": 0.0,
+    "z": 1.0,  # Position initiale en Z (au-dessus du sol)
+    "rz": 0.0,  # Rotation du 4ème axe (en radians)
+}
+
+LIMITS = {
+    "x": (-0.8, 0.8),
+    "y": (-0.8, 0.8),
+    "z": (0.3, 1.8),
+}
+
+BASE_Z = 2.0
+
+# Variables globales gérées dynamiquement par page
+end_effector = None
+link_lines = []
+scene = None
+coord_label = None
+active_jog = {"axis": None, "delta": 0.0}
+
+
+def update_robot_graphics():
+    """Met à jour la position de l'effecteur et redessine les bras de liaison"""
+    global end_effector, link_lines, scene, coord_label
+
+    if not end_effector or not scene or not coord_label:
+        return
+
+    x = robot_state["x"]
+    y = robot_state["y"]
+    z = robot_state["z"]
+    rz = robot_state["rz"]
+
+    # 1. Déplacer et orienter correctement l'effecteur mobile
+    for child in list(end_effector.children):
+        child.delete()
+    with end_effector:
+        # Plateau horizontal de la plateforme mobile
+        ui.scene.box(0.4, 0.1, 0.4).material("#2c3e50").rotate(1.5708, 0, 0)
+        # 4ème axe : cylindre vertical orienté selon Z
+        ui.scene.cylinder(0.05, 0.05, 0.5).material("#e74c3c").rotate(
+            1.5708, 0, rz
+        ).move(0, 0, 0)
+
+    end_effector.move(x, y, z)
+
+    # 2. Redessiner les 3 bras cinématiques de liaison
+    base_joints = [
+        (0.6, 0.0, BASE_Z),
+        (-0.3, 0.52, BASE_Z),
+        (-0.3, -0.52, BASE_Z),
+    ]
+
+    for line in link_lines:
+        line.delete()
+    link_lines.clear()
+
+    for bx, by, bz in base_joints:
+        control1 = [
+            bx + (x - bx) / 3,
+            by + (y - by) / 3,
+            bz + (z - bz) / 3,
+        ]
+        control2 = [
+            bx + 2 * (x - bx) / 3,
+            by + 2 * (y - by) / 3,
+            bz + 2 * (z - bz) / 3,
+        ]
+        line = scene.curve([bx, by, bz], control1, control2, [x, y, z]).material(
+            "#f1c40f"
+        )
+        link_lines.append(line)
+
+    # Mettre à jour l'affichage des coordonnées
+    coord_label.text = f"X: {x:.2f} m | Y: {y:.2f} m | Z: {z:.2f} m | Rz: {rz:.2f} rad"
+
+
+def apply_jog():
+    """Fonction appelée à intervalle régulier (timer) si un bouton est maintenu enfoncé"""
+    axis = active_jog["axis"]
+    delta = active_jog["delta"]
+
+    if axis is None or delta == 0.0:
+        return
+
+    if axis in ["x", "y", "z"]:
+        new_val = robot_state[axis] + delta
+        if LIMITS[axis][0] <= new_val <= LIMITS[axis][1]:
+            robot_state[axis] = new_val
+    elif axis == "rz":
+        robot_state["rz"] += delta
+
+    update_robot_graphics()
+
+
+def start_jog(axis: str, delta: float):
+    active_jog["axis"] = axis
+    active_jog["delta"] = delta
+
+
+def stop_jog():
+    active_jog["axis"] = None
+    active_jog["delta"] = 0.0
+
+
+def reset_robot():
+    stop_jog()
+    robot_state["x"] = 0.0
+    robot_state["y"] = 0.0
+    robot_state["z"] = 1.0
+    robot_state["rz"] = 0.0
+    ui.notify("Robot réinitialisé en position HOME", type="info")
+    update_robot_graphics()
+
+
+# --- DÉFINITION DES PAGES WEB ---
+
+
+@ui.page("/")
+def home_page():
+    """Page d'accueil du site web"""
+    with ui.column().classes(
+        "w-full h-screen items-center justify-center gap-6 bg-grey-1"
+    ):
+        ui.markdown("# 🚀 Portail de Contrôle Industriel").classes("text-primary")
+        ui.label(
+            "Bienvenue sur l'interface de pilotage de cellules robotisées."
+        ).classes("text-lg text-gray-600")
+
+        with ui.card().classes("p-6 items-center gap-4 shadow-md"):
+            ui.label("Cellule Robot Delta 4 Axes").classes(
+                "font-bold text-xl text-gray-800"
+            )
+            ui.link(
+                "Lancer la Simulation 3D →", "/robot"
+            ).classes(  # Lien vers la page du robot
+                "bg-blue-600 text-white font-bold py-2 px-4 rounded hover:bg-blue-700 no-underline"
+            )
+
+
+@ui.page("/robot")
+def robot_page():
+    """Page de simulation 3D du Robot Delta"""
+    global end_effector, scene, coord_label
+
+    # Barre de navigation supérieure pour retourner à l'accueil
+    with ui.row().classes("w-full items-center justify-between bg-dark p-2 px-4"):
+        ui.label("🤖 Simulation Live - Robot Delta 4 Axes").classes(
+            "text-white font-bold text-lg"
+        )
+        ui.link("← Retour Accueil", "/").classes(
+            "text-blue-300 hover:text-white no-underline font-semibold"
+        )
+
+    with ui.row().classes("w-full items-start gap-4 p-4"):
+
+        # --- COLONNE DE GAUCHE : SCÈNE 3D ---
+        with ui.card().classes("flex-grow bg-grey-2 p-0"):
+            with ui.scene(width=800, height=600) as sc:
+                scene = sc
+                # Caméra positionnée pour voir le sol et le robot en hauteur
+                sc.move_camera(
+                    x=3.5,
+                    y=-3.5,
+                    z=2.0,
+                    look_at_x=0,
+                    look_at_y=0,
+                    look_at_z=1.0,
+                )
+
+                # Structure fixe du Robot Delta (en haut à BASE_Z)
+                with ui.scene.group().move(0, 0, BASE_Z):
+                    ui.scene.cylinder(0.9, 0.9, 0.1).material(
+                        "#7f8c8d"
+                    ).rotate(1.5708, 0, 0)
+                    for bx, by in [(0.6, 0.0), (-0.3, 0.52), (-0.3, -0.52)]:
+                        ui.scene.cylinder(0.04, 0.04, BASE_Z).material(
+                            "#bdc3c7"
+                        ).rotate(1.5708, 0, 0).move(bx, by, -BASE_Z / 2)
+
+                # Groupe de l'effecteur mobile
+                end_effector = ui.scene.group()
+
+        # --- COLONNE DE DROITE : TEACH PENDANT (CONTRÔLE) ---
+        with ui.card().classes("w-80 p-4 flex flex-col gap-4"):
+            ui.label("Teach Pendant (Jogging Continu)").classes(
+                "text-lg font-bold text-primary"
+            )
+
+            coord_label = ui.label("").classes(
+                "text-sm font-mono bg-dark text-white p-2 rounded"
+            )
+
+            step = (
+                0.025  # Pas plus fin pour une transition fluide en continu
+            )
+
+            def create_jog_button(label, axis, delta, color_class):
+                btn = ui.button(label).classes(f"{color_class} text-white flex-1")
+                btn.on("mousedown", lambda: start_jog(axis, delta))
+                btn.on("mouseup", lambda: stop_jog())
+                btn.on("mouseleave", lambda: stop_jog())
+                return btn
+
+            # Contrôles Axe X
+            ui.label("Axe X").classes("font-semibold text-gray-700 mb-[-10px]")
+            with ui.row().classes("w-full justify-between"):
+                create_jog_button("X -", "x", -step, "bg-red-500")
+                create_jog_button("X +", "x", step, "bg-green-500")
+
+            # Contrôles Axe Y
+            ui.label("Axe Y").classes("font-semibold text-gray-700 mb-[-10px]")
+            with ui.row().classes("w-full justify-between"):
+                create_jog_button("Y -", "y", -step, "bg-red-500")
+                create_jog_button("Y +", "y", step, "bg-green-500")
+
+            # Contrôles Axe Z
+            ui.label("Axe Z").classes("font-semibold text-gray-700 mb-[-10px]")
+            with ui.row().classes("w-full justify-between"):
+                create_jog_button("Z -", "z", -step, "bg-red-500")
+                create_jog_button("Z +", "z", step, "bg-green-500")
+
+            # Contrôles Axe Rz (Rotation)
+            ui.label("Rotation 4e Axe (Rz)").classes(
+                "font-semibold text-gray-700 mb-[-10px]"
+            )
+            with ui.row().classes("w-full justify-between"):
+                create_jog_button("Rz -", "rz", -0.1, "bg-orange-500")
+                create_jog_button("Rz +", "rz", 0.1, "bg-orange-500")
+
+            ui.separator()
+
+            ui.button("🏠 RESET HOME", on_click=reset_robot).classes(
+                "w-full bg-blue-600 text-white font-bold"
+            )
+
+    # Initialisation de l'affichage de la page robot
+    update_robot_graphics()
+    ui.timer(0.03, apply_jog)
+
+
+# Lancer l'application NiceGUI
+ui.run(host="0.0.0.0", port=8080, title="Portail Robotique Multi-Pages", on_air=False)
+
+"""
+
+
+"""
+
+---------------TEST3---------------
+
+from nicegui import ui
+from threading import Lock
+
+
+# ============================================================
+# ÉTAT GLOBAL ET PARTAGÉ DU ROBOT
+# ============================================================
+
+# UN SEUL ROBOT POUR TOUS LES UTILISATEURS
+robot_state = {
+    "x": 0.0,
+    "y": 0.0,
+    "z": 1.0,
+    "rz": 0.0,
+}
+
+LIMITS = {
+    "x": (-0.8, 0.8),
+    "y": (-0.8, 0.8),
+    "z": (0.3, 1.8),
+}
+
+BASE_Z = 2.0
+
+
+# ============================================================
+# SYNCHRONISATION DU ROBOT
+# ============================================================
+
+robot_lock = Lock()
+
+# Augmente à chaque modification de la position globale
+robot_version = 0
+
+
+# ============================================================
+# PAGE ACCUEIL
+# ============================================================
+
+@ui.page("/")
+def home_page():
+
+    with ui.column().classes(
+        "w-full h-screen items-center justify-center "
+        "gap-6 bg-grey-1"
+    ):
+
+        ui.markdown(
+            "# 🚀 Portail de Contrôle Industriel"
+        ).classes("text-primary")
+
+        ui.label(
+            "Bienvenue sur l'interface de pilotage "
+            "de cellules robotisées."
+        ).classes("text-lg text-gray-600")
+
+        with ui.card().classes(
+            "p-6 items-center gap-4 shadow-md"
+        ):
+
+            ui.label(
+                "Cellule Robot Delta 4 Axes"
+            ).classes(
+                "font-bold text-xl text-gray-800"
+            )
+
+            ui.link(
+                "Lancer la Simulation 3D →",
+                "/robot"
+            ).classes(
+                "bg-blue-600 text-white font-bold "
+                "py-2 px-4 rounded "
+                "hover:bg-blue-700 no-underline"
+            )
+
+
+# ============================================================
+# PAGE ROBOT
+# ============================================================
+
+@ui.page("/robot")
+def robot_page():
+
+    global robot_version
+
+    # ========================================================
+    # VARIABLES LOCALES À CE NAVIGATEUR
+    # ========================================================
+
+    # Chaque utilisateur possède sa propre scène
+    scene = None
+    end_effector = None
+    coord_label = None
+
+    # Les trois courbes jaunes de CETTE scène
+    link_lines = []
+
+    # Jogging propre à cet utilisateur
+    active_jog = {
+        "axis": None,
+        "delta": 0.0,
+    }
+
+    # Version du robot actuellement affichée
+    last_version = -1
+
+
+    # ========================================================
+    # MISE À JOUR DE LA SCÈNE 3D
+    # ========================================================
+
+    def update_robot_graphics():
+
+        nonlocal last_version
+
+        if (
+            scene is None
+            or end_effector is None
+            or coord_label is None
+        ):
+            return
+
+        # ----------------------------------------------------
+        # Lire l'état global du robot
+        # ----------------------------------------------------
+
+        with robot_lock:
+
+            x = robot_state["x"]
+            y = robot_state["y"]
+            z = robot_state["z"]
+            rz = robot_state["rz"]
+
+            current_version = robot_version
+
+
+        # ====================================================
+        # EFFECTEUR MOBILE
+        # ====================================================
+
+        # Supprimer l'ancien contenu
+        for child in list(end_effector.children):
+            child.delete()
+
+        # Recréer l'effecteur exactement comme dans TEST2
+        with end_effector:
+
+            # Plateau horizontal
+            ui.scene.box(
+                0.4,
+                0.1,
+                0.4
+            ).material(
+                "#2c3e50"
+            ).rotate(
+                1.5708,
+                0,
+                0
+            )
+
+            # =================================================
+            # 4ème AXE
+            # =================================================
+
+            ui.scene.cylinder(
+                0.05,
+                0.05,
+                0.5
+            ).material(
+                "#e74c3c"
+            ).rotate(
+                1.5708,
+                0,
+                rz
+            ).move(
+                0,
+                0,
+                0
+            )
+
+        # Positionner l'effecteur
+        end_effector.move(x, y, z)
+        # ====================================================
+        # POINT CENTRAL DE L'EFFECTEUR
+        # ====================================================
+
+        
+        scene.sphere(
+            0.06,
+            12,
+            8
+        ).material("#00ff00").move(x, y, z)
+
+
+        # ====================================================
+        # TROIS LIAISONS JAUNES
+        # ====================================================
+
+        base_joints = [
+            (0.6, 0.0, BASE_Z),
+            (-0.3, 0.52, BASE_Z),
+            (-0.3, -0.52, BASE_Z),
+        ]
+
+        # Supprimer les anciennes courbes
+        for line in link_lines:
+            line.delete()
+
+        link_lines.clear()
+
+
+        # Recréer les trois courbes
+        for bx, by, bz in base_joints:
+
+            control1 = [
+                bx + (x - bx) / 3,
+                by + (y - by) / 3,
+                bz + (z - bz) / 3,
+            ]
+
+            control2 = [
+                bx + 2 * (x - bx) / 3,
+                by + 2 * (y - by) / 3,
+                bz + 2 * (z - bz) / 3,
+            ]
+
+            line = scene.curve(
+                [bx, by, bz],
+                control1,
+                control2,
+                [x, y, z],
+            ).material(
+                "#f1c40f"
+            )
+
+            link_lines.append(line)
+
+
+        # ====================================================
+        # COORDONNÉES
+        # ====================================================
+
+        coord_label.text = (
+            f"X: {x:.2f} m | "
+            f"Y: {y:.2f} m | "
+            f"Z: {z:.2f} m | "
+            f"Rz: {rz:.2f} rad"
+        )
+
+        # Mémoriser la version affichée
+        last_version = current_version
+
+
+    # ========================================================
+    # DÉPLACER LE ROBOT GLOBAL
+    # ========================================================
+
+    def move_robot(axis, delta):
+
+        global robot_version
+
+        with robot_lock:
+
+            # ------------------------------------------------
+            # X / Y / Z
+            # ------------------------------------------------
+
+            if axis in ("x", "y", "z"):
+
+                new_value = (
+                    robot_state[axis]
+                    + delta
+                )
+
+                minimum, maximum = LIMITS[axis]
+
+                if not (
+                    minimum
+                    <= new_value
+                    <= maximum
+                ):
+                    return
+
+                robot_state[axis] = new_value
+
+            # ------------------------------------------------
+            # RZ
+            # ------------------------------------------------
+
+            elif axis == "rz":
+
+                robot_state["rz"] += delta
+
+            else:
+                return
+
+            # Signaler que le robot a changé
+            robot_version += 1
+
+
+    # ========================================================
+    # JOG CONTINU
+    # ========================================================
+
+    def apply_jog():
+
+        axis = active_jog["axis"]
+        delta = active_jog["delta"]
+
+        if axis is None:
+            return
+
+        if delta == 0.0:
+            return
+
+        # Modifier le robot partagé
+        move_robot(
+            axis,
+            delta
+        )
+
+        # Mise à jour immédiate de CET utilisateur
+        update_robot_graphics()
+
+
+    # ========================================================
+    # DÉMARRER JOG
+    # ========================================================
+
+    def start_jog(axis, delta):
+
+        active_jog["axis"] = axis
+        active_jog["delta"] = delta
+
+
+    # ========================================================
+    # ARRÊTER JOG
+    # ========================================================
+
+    def stop_jog():
+
+        active_jog["axis"] = None
+        active_jog["delta"] = 0.0
+
+
+    # ========================================================
+    # RESET HOME
+    # ========================================================
+
+    def reset_robot():
+
+        global robot_version
+
+        stop_jog()
+
+        with robot_lock:
+
+            robot_state["x"] = 0.0
+            robot_state["y"] = 0.0
+            robot_state["z"] = 1.0
+            robot_state["rz"] = 0.0
+
+            robot_version += 1
+
+        ui.notify(
+            "Robot réinitialisé en position HOME",
+            type="info"
+        )
+
+        update_robot_graphics()
+
+
+    # ========================================================
+    # BARRE DU HAUT
+    # ========================================================
+
+    with ui.row().classes(
+        "w-full items-center justify-between "
+        "bg-dark p-2 px-4"
+    ):
+
+        ui.label(
+            "🤖 Simulation Live - Robot Delta 4 Axes"
+        ).classes(
+            "text-white font-bold text-lg"
+        )
+
+        ui.link(
+            "← Retour Accueil",
+            "/"
+        ).classes(
+            "text-blue-300 hover:text-white "
+            "no-underline font-semibold"
+        )
+
+
+    # ========================================================
+    # CONTENU
+    # ========================================================
+
+    with ui.row().classes(
+        "w-full items-start gap-4 p-4"
+    ):
+
+        # ====================================================
+        # SCÈNE 3D
+        # ====================================================
+
+        with ui.card().classes(
+            "flex-grow bg-grey-2 p-0"
+        ):
+
+            with ui.scene(
+                width=800,
+                height=600
+            ) as sc:
+
+                scene = sc
+
+                # ------------------------------------------------
+                # CAMÉRA INDÉPENDANTE
+                # ------------------------------------------------
+
+                sc.move_camera(
+                    x=3.5,
+                    y=-3.5,
+                    z=2.0,
+                    look_at_x=0,
+                    look_at_y=0,
+                    look_at_z=1.0,
+                )
+
+
+                # =================================================
+                # STRUCTURE FIXE DU ROBOT
+                # =================================================
+
+                with ui.scene.group().move(
+                    0,
+                    0,
+                    BASE_Z
+                ):
+
+                    # Plateau supérieur
+                    ui.scene.cylinder(
+                        0.9,
+                        0.9,
+                        0.1
+                    ).material(
+                        "#7f8c8d"
+                    ).rotate(
+                        1.5708,
+                        0,
+                        0
+                    )
+
+
+                    # ------------------------------------------------
+                    # Trois montants verticaux
+                    # ------------------------------------------------
+
+                    for bx, by in [
+                        (0.6, 0.0),
+                        (-0.3, 0.52),
+                        (-0.3, -0.52),
+                    ]:
+
+                        ui.scene.cylinder(
+                            0.04,
+                            0.04,
+                            BASE_Z
+                        ).material(
+                            "#bdc3c7"
+                        ).rotate(
+                            1.5708,
+                            0,
+                            0
+                        ).move(
+                            bx,
+                            by,
+                            -BASE_Z / 2
+                        )
+
+
+                # =================================================
+                # EFFECTEUR
+                # =================================================
+
+                end_effector = ui.scene.group()
+
+
+        # ====================================================
+        # TEACH PENDANT
+        # ====================================================
+
+        with ui.card().classes(
+            "w-80 p-4 flex flex-col gap-4"
+        ):
+
+            ui.label(
+                "Teach Pendant (Jogging Continu)"
+            ).classes(
+                "text-lg font-bold text-primary"
+            )
+
+
+            # ------------------------------------------------
+            # Coordonnées
+            # ------------------------------------------------
+
+            coord_label = ui.label(
+                ""
+            ).classes(
+                "text-sm font-mono "
+                "bg-dark text-white p-2 rounded"
+            )
+
+
+            step = 0.025
+
+
+            # =================================================
+            # BOUTONS JOG
+            # =================================================
+
+            def create_jog_button(
+                label,
+                axis,
+                delta,
+                color_class
+            ):
+
+                btn = ui.button(
+                    label
+                ).classes(
+                    f"{color_class} text-white flex-1"
+                )
+
+                # Souris
+                btn.on(
+                    "mousedown",
+                    lambda: start_jog(
+                        axis,
+                        delta
+                    )
+                )
+
+                btn.on(
+                    "mouseup",
+                    lambda: stop_jog()
+                )
+
+                btn.on(
+                    "mouseleave",
+                    lambda: stop_jog()
+                )
+
+                # Tactile
+                btn.on(
+                    "touchstart",
+                    lambda: start_jog(
+                        axis,
+                        delta
+                    )
+                )
+
+                btn.on(
+                    "touchend",
+                    lambda: stop_jog()
+                )
+
+                return btn
+
+
+            # =================================================
+            # AXE X
+            # =================================================
+
+            ui.label(
+                "Axe X"
+            ).classes(
+                "font-semibold text-gray-700 mb-[-10px]"
+            )
+
+            with ui.row().classes(
+                "w-full justify-between"
+            ):
+
+                create_jog_button(
+                    "X -",
+                    "x",
+                    -step,
+                    "bg-red-500"
+                )
+
+                create_jog_button(
+                    "X +",
+                    "x",
+                    step,
+                    "bg-green-500"
+                )
+
+
+            # =================================================
+            # AXE Y
+            # =================================================
+
+            ui.label(
+                "Axe Y"
+            ).classes(
+                "font-semibold text-gray-700 mb-[-10px]"
+            )
+
+            with ui.row().classes(
+                "w-full justify-between"
+            ):
+
+                create_jog_button(
+                    "Y -",
+                    "y",
+                    -step,
+                    "bg-red-500"
+                )
+
+                create_jog_button(
+                    "Y +",
+                    "y",
+                    step,
+                    "bg-green-500"
+                )
+
+
+            # =================================================
+            # AXE Z
+            # =================================================
+
+            ui.label(
+                "Axe Z"
+            ).classes(
+                "font-semibold text-gray-700 mb-[-10px]"
+            )
+
+            with ui.row().classes(
+                "w-full justify-between"
+            ):
+
+                create_jog_button(
+                    "Z -",
+                    "z",
+                    -step,
+                    "bg-red-500"
+                )
+
+                create_jog_button(
+                    "Z +",
+                    "z",
+                    step,
+                    "bg-green-500"
+                )
+
+
+            # =================================================
+            # RZ
+            # =================================================
+
+            ui.label(
+                "Rotation 4e Axe (Rz)"
+            ).classes(
+                "font-semibold text-gray-700 mb-[-10px]"
+            )
+
+            with ui.row().classes(
+                "w-full justify-between"
+            ):
+
+                create_jog_button(
+                    "Rz -",
+                    "rz",
+                    -0.1,
+                    "bg-orange-500"
+                )
+
+                create_jog_button(
+                    "Rz +",
+                    "rz",
+                    0.1,
+                    "bg-orange-500"
+                )
+
+
+            ui.separator()
+
+
+            # =================================================
+            # RESET
+            # =================================================
+
+            ui.button(
+                "🏠 RESET HOME",
+                on_click=reset_robot
+            ).classes(
+                "w-full bg-blue-600 text-white font-bold"
+            )
+
+
+    # ========================================================
+    # AFFICHAGE INITIAL
+    # ========================================================
+
+    update_robot_graphics()
+
+
+    # ========================================================
+    # TIMER DE JOG
+    # ========================================================
+
+    ui.timer(
+        0.03,
+        apply_jog
+    )
+
+
+    # ========================================================
+    # SYNCHRONISATION AVEC LES AUTRES UTILISATEURS
+    # ========================================================
+
+    def synchronize_robot():
+
+        with robot_lock:
+            current_version = robot_version
+
+        if current_version != last_version:
+            update_robot_graphics()
+
+
+    ui.timer(
+        0.03,
+        synchronize_robot
+    )
+
+
+# ============================================================
+# LANCEMENT
+# ============================================================
+
+ui.run(
+    host="0.0.0.0",
+    port=8080,
+    title="Portail Robotique Multi-Pages",
+    on_air=False,
+)
+
+"""
+
+"""
+
+--------------TEST4--------------- FONCTIONNEL AVEC COMM DISTANCE ET PARTAGE DE VISU
+
+from nicegui import ui
+from threading import Lock
+import math
+
+
+# ============================================================
+#                    ÉTAT GLOBAL DU ROBOT
+# ============================================================
+
+# Cet état est PARTAGÉ entre tous les utilisateurs.
+robot_state = {
+    "x": 0.0,
+    "y": 0.0,
+    "z": 1.0,
+    "rz": 0.0,
+}
+
+# Limites de déplacement
+LIMITS = {
+    "x": (-0.8, 0.8),
+    "y": (-0.8, 0.8),
+    "z": (0.3, 1.8),
+    "rz": (-math.pi, math.pi),
+}
+
+# Hauteur du plateau supérieur
+BASE_Z = 2.0
+
+# Protection de l'état global
+robot_lock = Lock()
+
+# Version de l'état robot.
+# Chaque modification augmente cette valeur.
+robot_version = 0
+
+
+# ============================================================
+#                    FONCTIONS UTILITAIRES
+# ============================================================
+
+def clamp(value, minimum, maximum):
+    """Limite une valeur entre minimum et maximum."""
+    return max(minimum, min(maximum, value))
+
+
+def get_robot_state():
+    """
+    Retourne une copie de l'état du robot
+    ainsi que son numéro de version.
+    """
+    with robot_lock:
+        return robot_state.copy(), robot_version
+
+
+# ============================================================
+#                    MOUVEMENT DU ROBOT
+# ============================================================
+
+def move_robot(axis, delta):
+    """
+    Modifie l'état global partagé du robot.
+
+    Si l'utilisateur A déplace le robot,
+    l'utilisateur B verra également le déplacement.
+    """
+
+    global robot_version
+
+    with robot_lock:
+
+        # -------------------------------
+        # AXE X
+        # -------------------------------
+
+        if axis == "x":
+
+            robot_state["x"] = clamp(
+                robot_state["x"] + delta,
+                LIMITS["x"][0],
+                LIMITS["x"][1],
+            )
+
+        # -------------------------------
+        # AXE Y
+        # -------------------------------
+
+        elif axis == "y":
+
+            robot_state["y"] = clamp(
+                robot_state["y"] + delta,
+                LIMITS["y"][0],
+                LIMITS["y"][1],
+            )
+
+        # -------------------------------
+        # AXE Z
+        # -------------------------------
+
+        elif axis == "z":
+
+            robot_state["z"] = clamp(
+                robot_state["z"] + delta,
+                LIMITS["z"][0],
+                LIMITS["z"][1],
+            )
+
+        # -------------------------------
+        # ROTATION RZ
+        # -------------------------------
+
+        elif axis == "rz":
+
+            robot_state["rz"] += delta
+
+            # Ramener l'angle dans [-pi ; +pi]
+            if robot_state["rz"] > math.pi:
+                robot_state["rz"] -= 2 * math.pi
+
+            if robot_state["rz"] < -math.pi:
+                robot_state["rz"] += 2 * math.pi
+
+        # Nouvelle version de l'état partagé
+        robot_version += 1
+
+
+# ============================================================
+#                    RESET ROBOT
+# ============================================================
+
+def reset_robot():
+
+    global robot_version
+
+    with robot_lock:
+
+        robot_state["x"] = 0.0
+        robot_state["y"] = 0.0
+        robot_state["z"] = 1.0
+        robot_state["rz"] = 0.0
+
+        robot_version += 1
+
+
+# ============================================================
+#                    PAGE PRINCIPALE
+# ============================================================
+
+@ui.page("/")
+def robot_page():
+
+    # ========================================================
+    # OBJETS PROPRES À CET UTILISATEUR
+    # ========================================================
+
+    scene = None
+
+    end_effector = None
+
+    center_point = None
+    platform = None
+    rz_axis = None
+
+    coord_label = None
+
+    # Liste des trois bras jaunes
+    link_lines = []
+
+    # Jog de cet utilisateur
+    active_jog = {
+        "axis": None,
+        "delta": 0.0,
+    }
+
+    # Version du robot connue par cette fenêtre
+    last_version = -1
+
+    # Pas de déplacement
+    STEP = 0.025
+
+    # Pas de rotation
+    RZ_STEP = 0.1
+
+
+    # ========================================================
+    #                    MISE À JOUR 3D
+    # ========================================================
+
+    def update_robot_graphics(force=False):
+
+        nonlocal last_version
+
+        if scene is None:
+            return
+
+        # ----------------------------------------------------
+        # Lire l'état global
+        # ----------------------------------------------------
+
+        state, version = get_robot_state()
+
+        # Si rien n'a changé, inutile de redessiner
+        if not force and version == last_version:
+            return
+
+        x = state["x"]
+        y = state["y"]
+        z = state["z"]
+        rz = state["rz"]
+
+
+        # ====================================================
+        # POSITION DE L'EFFECTEUR
+        # ====================================================
+        #
+        # TRÈS IMPORTANT :
+        #
+        # center_point
+        # platform
+        # rz_axis
+        #
+        # sont tous des enfants de end_effector.
+        #
+        # Cette commande déplace donc toute la partie mobile.
+        #
+        # ====================================================
+
+        end_effector.move(x, y, z)
+
+
+        # ====================================================
+        # ROTATION RZ
+        # ====================================================
+
+        if rz_axis is not None:
+
+            rz_axis.rotate(
+                math.pi / 2,
+                0,
+                rz
+            )
+
+
+        # ====================================================
+        # SUPPRIMER LES ANCIENS BRAS JAUNES
+        # ====================================================
+
+        for line in link_lines:
+
+            try:
+                line.delete()
+            except Exception:
+                pass
+
+        link_lines.clear()
+
+
+        # ====================================================
+        # POINTS D'ATTACHE SUPÉRIEURS
+        # ====================================================
+
+        base_points = [
+            (0.6, 0.0, BASE_Z),
+            (-0.3, 0.52, BASE_Z),
+            (-0.3, -0.52, BASE_Z),
+        ]
+
+
+        # ====================================================
+        # CRÉATION DES 3 BRAS JAUNES
+        # ====================================================
+
+        for bx, by, bz in base_points:
+
+            # -----------------------------------------------
+            # Premier point de contrôle
+            # -----------------------------------------------
+
+            c1x = bx + (x - bx) * 0.33
+            c1y = by + (y - by) * 0.33
+            c1z = bz + (z - bz) * 0.33
+
+
+            # -----------------------------------------------
+            # Deuxième point de contrôle
+            # -----------------------------------------------
+
+            c2x = bx + (x - bx) * 0.66
+            c2y = by + (y - by) * 0.66
+            c2z = bz + (z - bz) * 0.66
+
+
+            # -----------------------------------------------
+            # COURBE
+            #
+            # NiceGUI attend :
+            #
+            # curve(
+            #     start,
+            #     control1,
+            #     control2,
+            #     end
+            # )
+            # -----------------------------------------------
+
+            line = scene.curve(
+                [bx, by, bz],
+                [c1x, c1y, c1z],
+                [c2x, c2y, c2z],
+                [x, y, z],
+            ).material(
+                "#f1c40f"
+            )
+
+            link_lines.append(line)
+
+
+        # ====================================================
+        # MISE À JOUR DES COORDONNÉES
+        # ====================================================
+
+        if coord_label is not None:
+
+            coord_label.text = (
+                f"X = {x:+.3f}    "
+                f"Y = {y:+.3f}    "
+                f"Z = {z:+.3f}    "
+                f"Rz = {math.degrees(rz):+.1f}°"
+            )
+
+
+        # Mémoriser la version affichée
+        last_version = version
+
+
+    # ========================================================
+    #                    JOG
+    # ========================================================
+
+    def start_jog(axis, delta):
+
+        active_jog["axis"] = axis
+        active_jog["delta"] = delta
+
+
+    def stop_jog():
+
+        active_jog["axis"] = None
+        active_jog["delta"] = 0.0
+
+
+    def apply_jog():
+
+        axis = active_jog["axis"]
+        delta = active_jog["delta"]
+
+        if axis is None:
+            return
+
+        # Modifier le robot global
+        move_robot(axis, delta)
+
+        # Mise à jour immédiate de cette fenêtre
+        update_robot_graphics(force=True)
+
+
+    # ========================================================
+    #             SYNCHRONISATION MULTI-UTILISATEURS
+    # ========================================================
+
+    def synchronize_robot():
+
+        nonlocal last_version
+
+        _, version = get_robot_state()
+
+        # Un autre utilisateur a modifié le robot
+        if version != last_version:
+
+            update_robot_graphics(
+                force=True
+            )
+
+
+    # ========================================================
+    #                    INTERFACE
+    # ========================================================
+
+    with ui.column().classes(
+        "w-full h-screen p-4 bg-gray-100"
+    ):
+
+        # ====================================================
+        # TITRE
+        # ====================================================
+
+        ui.label(
+            "Simulation Delta Robot"
+        ).classes(
+            "text-2xl font-bold"
+        )
+
+
+        # ====================================================
+        # ZONE PRINCIPALE
+        # ====================================================
+
+        with ui.row().classes(
+            "w-full flex-1 items-stretch"
+        ):
+
+
+            # =================================================
+            #                    SCÈNE 3D
+            # =================================================
+
+            with ui.card().classes(
+                "flex-1 h-full"
+            ):
+
+                with ui.scene(
+                    width=900,
+                    height=650,
+                    grid=(5, 20),
+                    background_color="#eeeeee",
+                ) as scene:
+
+
+                    # =========================================
+                    # CAMÉRA
+                    # =========================================
+
+                    # Chaque navigateur possède sa propre scène
+                    # donc sa propre caméra.
+                    #
+                    # Le robot, lui, est partagé via robot_state.
+
+                    scene.move_camera(
+                        x=3.5,
+                        y=-3.5,
+                        z=2.0,
+                        look_at_x=0,
+                        look_at_y=0,
+                        look_at_z=1.0,
+                        duration=0,
+                    )
+
+
+                    # =========================================
+                    # PLATEAU SUPÉRIEUR
+                    # =========================================
+
+                    with scene.group().move(
+                        0,
+                        0,
+                        BASE_Z
+                    ):
+
+                        scene.cylinder(
+                            0.9,
+                            0.9,
+                            0.1
+                        ).material(
+                            "#7f8c8d"
+                        ).rotate(
+                            math.pi / 2,
+                            0,
+                            0
+                        )
+
+
+                        # =====================================
+                        # COLONNES VERTICALES
+                        # =====================================
+
+                        base_points = [
+                            (0.6, 0.0),
+                            (-0.3, 0.52),
+                            (-0.3, -0.52),
+                        ]
+
+
+                        for bx, by in base_points:
+
+                            scene.cylinder(
+                                0.04,
+                                0.04,
+                                BASE_Z
+                            ).material(
+                                "#bdc3c7"
+                            ).rotate(
+                                math.pi / 2,
+                                0,
+                                0
+                            ).move(
+                                bx,
+                                by,
+                                -BASE_Z / 2
+                            )
+
+
+                    # =========================================
+                    # GROUPE DE LA PARTIE MOBILE
+                    # =========================================
+                    #
+                    # C'EST LE POINT IMPORTANT.
+                    #
+                    # Tout ce qui est créé ici appartient
+                    # au groupe end_effector.
+                    #
+                    # Lorsque nous faisons :
+                    #
+                    #     end_effector.move(x, y, z)
+                    #
+                    # tout le contenu suit.
+                    #
+                    # =========================================
+
+                    with scene.group() as end_effector:
+
+
+                        # =====================================
+                        # POINT CENTRAL VERT
+                        # =====================================
+                        #
+                        # Ce point représente l'origine
+                        # exacte de l'effecteur.
+                        #
+
+                        center_point = scene.sphere(
+                            0.06
+                        ).material(
+                            "#00ff00"
+                        )
+
+
+                        # =====================================
+                        # PLATEFORME NOIRE
+                        # =====================================
+
+                        platform = scene.box(
+                            0.4,
+                            0.1,
+                            0.4
+                        ).material(
+                            "#2c3e50"
+                        ).rotate(
+                            math.pi / 2,
+                            0,
+                            0
+                        )
+
+
+                        # =====================================
+                        # AXE ROUGE DE ROTATION RZ
+                        # =====================================
+
+                        rz_axis = scene.cylinder(
+                            0.05,
+                            0.05,
+                            0.5
+                        ).material(
+                            "#e74c3c"
+                        ).rotate(
+                            math.pi / 2,
+                            0,
+                            0
+                        )
+
+
+                    # =========================================
+                    # AFFICHAGE INITIAL
+                    # =========================================
+
+                    update_robot_graphics(
+                        force=True
+                    )
+
+
+            # =================================================
+            #                 PANNEAU DE COMMANDE
+            # =================================================
+
+            with ui.card().classes(
+                "w-72 p-4"
+            ):
+
+                ui.label(
+                    "Commande"
+                ).classes(
+                    "text-xl font-bold"
+                )
+
+
+                # =============================================
+                # COORDONNÉES
+                # =============================================
+
+                coord_label = ui.label(
+                    "X = +0.000    "
+                    "Y = +0.000    "
+                    "Z = +1.000    "
+                    "Rz = +0.0°"
+                ).classes(
+                    "font-mono text-sm"
+                )
+
+
+                ui.separator()
+
+
+                # =============================================
+                # AXE X
+                # =============================================
+
+                ui.label(
+                    "Axe X"
+                ).classes(
+                    "font-bold"
+                )
+
+                with ui.row():
+
+                    minus_x = ui.button(
+                        "X −"
+                    ).props(
+                        "color=primary"
+                    )
+
+                    plus_x = ui.button(
+                        "X +"
+                    ).props(
+                        "color=primary"
+                    )
+
+
+                # =============================================
+                # AXE Y
+                # =============================================
+
+                ui.label(
+                    "Axe Y"
+                ).classes(
+                    "font-bold"
+                )
+
+                with ui.row():
+
+                    minus_y = ui.button(
+                        "Y −"
+                    ).props(
+                        "color=primary"
+                    )
+
+                    plus_y = ui.button(
+                        "Y +"
+                    ).props(
+                        "color=primary"
+                    )
+
+
+                # =============================================
+                # AXE Z
+                # =============================================
+
+                ui.label(
+                    "Axe Z"
+                ).classes(
+                    "font-bold"
+                )
+
+                with ui.row():
+
+                    minus_z = ui.button(
+                        "Z −"
+                    ).props(
+                        "color=primary"
+                    )
+
+                    plus_z = ui.button(
+                        "Z +"
+                    ).props(
+                        "color=primary"
+                    )
+
+
+                # =============================================
+                # ROTATION RZ
+                # =============================================
+
+                ui.label(
+                    "Rotation Rz"
+                ).classes(
+                    "font-bold"
+                )
+
+                with ui.row():
+
+                    minus_rz = ui.button(
+                        "Rz −"
+                    ).props(
+                        "color=primary"
+                    )
+
+                    plus_rz = ui.button(
+                        "Rz +"
+                    ).props(
+                        "color=primary"
+                    )
+
+
+                ui.separator()
+
+
+                # =============================================
+                # RESET
+                # =============================================
+
+                reset_button = ui.button(
+                    "RESET"
+                ).classes(
+                    "w-full"
+                ).props(
+                    "color=negative"
+                )
+
+
+                def do_reset():
+
+                    reset_robot()
+
+                    update_robot_graphics(
+                        force=True
+                    )
+
+
+                reset_button.on(
+                    "click",
+                    do_reset
+                )
+
+
+                ui.separator()
+
+
+                ui.label(
+                    "Maintenir un bouton pour déplacer"
+                ).classes(
+                    "text-sm text-gray-600"
+                )
+
+
+        # ====================================================
+        #                    TIMERS
+        # ====================================================
+
+        # Mouvement continu pendant que le bouton est maintenu
+        ui.timer(
+            0.03,
+            apply_jog
+        )
+
+        # Synchronisation entre utilisateurs
+        ui.timer(
+            0.03,
+            synchronize_robot
+        )
+
+
+    # ========================================================
+    #             CONNEXION DES BOUTONS DE JOG
+    # ========================================================
+
+    def connect_button(button, axis, delta):
+
+        # ----------------------------------------------------
+        # Souris
+        # ----------------------------------------------------
+
+        button.on(
+            "mousedown",
+            lambda: start_jog(axis, delta)
+        )
+
+        button.on(
+            "mouseup",
+            stop_jog
+        )
+
+        button.on(
+            "mouseleave",
+            stop_jog
+        )
+
+
+        # ----------------------------------------------------
+        # Écran tactile
+        # ----------------------------------------------------
+
+        button.on(
+            "touchstart",
+            lambda: start_jog(axis, delta)
+        )
+
+        button.on(
+            "touchend",
+            stop_jog
+        )
+
+        button.on(
+            "touchcancel",
+            stop_jog
+        )
+
+
+    # ========================================================
+    #                     AXE X
+    # ========================================================
+
+    connect_button(
+        minus_x,
+        "x",
+        -STEP
+    )
+
+    connect_button(
+        plus_x,
+        "x",
+        STEP
+    )
+
+
+    # ========================================================
+    #                     AXE Y
+    # ========================================================
+
+    connect_button(
+        minus_y,
+        "y",
+        -STEP
+    )
+
+    connect_button(
+        plus_y,
+        "y",
+        STEP
+    )
+
+
+    # ========================================================
+    #                     AXE Z
+    # ========================================================
+
+    connect_button(
+        minus_z,
+        "z",
+        -STEP
+    )
+
+    connect_button(
+        plus_z,
+        "z",
+        STEP
+    )
+
+
+    # ========================================================
+    #                     ROTATION RZ
+    # ========================================================
+
+    connect_button(
+        minus_rz,
+        "rz",
+        -RZ_STEP
+    )
+
+    connect_button(
+        plus_rz,
+        "rz",
+        RZ_STEP
+    )
+
+
+# ============================================================
+#                       LANCEMENT
+# ============================================================
+
+ui.run(
+    title="Delta Robot",
+    reload=False,
+    port=8080
+)
+
+"""
+

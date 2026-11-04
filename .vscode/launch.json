@@ -16,6 +16,16 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal"
+        },
+        {
+            "name": "C: Essai moteur sur COM3",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}\\Mouvements Robot\\modbus.exe",
+            "args": ["COM3"],
+            "cwd": "${workspaceFolder}\\Mouvements Robot",
+            "externalConsole": false,
+            "preLaunchTask": "Compiler le programme moteur (C)"
         }
     ]
 }
