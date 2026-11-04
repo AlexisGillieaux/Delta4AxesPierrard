@@ -25,6 +25,8 @@ import delta_transform as dt
 from rigid_transform import RigidTransform
 
 RACINE_PROJET = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(RACINE_PROJET / "Coords"))
+import trajectoires4Axes as tr      # noqa: E402  (trajectoires qui utilisent delta_transform)
 
 # Crayon pris de biais : TCP à 30 mm de l'axe de la bride, 80 mm plus bas, incliné de 45° autour de Y.
 OUTIL_CRAYON = [30, 0, -80, 0, 45, 0]
@@ -98,7 +100,7 @@ def _scenario_ligne(tool, user, p0, p1, rz0=0.0, rz1=0.0, n=101):
 
     hom_user = _mat(user)
     positions_base = positions @ hom_user[:3, :3].T + hom_user[:3, 3]
-    angles_naif = dt.delta4.DeltaInverse4(np.column_stack((positions_base, rz)))
+    angles_naif = dt.DeltaInverse4(np.column_stack((positions_base, rz)))
     tcp_naif = dt.delta_forward_with_frames(angles_naif, tool, user).translation
 
     return dict(positions=positions, rz=rz, cible=cible, angles=angles, retour=retour,
@@ -108,7 +110,7 @@ def _scenario_ligne(tool, user, p0, p1, rz0=0.0, rz1=0.0, n=101):
 def _verifier_ligne(sc, p0, p1, nom):
     """Vérifie que le TCP suit exactement la ligne demandée, à pas régulier, avec la bonne orientation."""
     assert not np.isnan(sc["angles"]).any(), f"{nom} : pose inatteignable sur la trajectoire"
-    assert (np.abs(sc["angles"][:, :3]) <= dt.delta4.d1.ANGLE_MAX_DEG).all(), f"{nom} : moteur hors limites"
+    assert (np.abs(sc["angles"][:, :3]) <= dt.d1.ANGLE_MAX_DEG).all(), f"{nom} : moteur hors limites"
 
     tcp = sc["retour"].translation
     ecart_ligne = _ecart_a_la_droite(tcp, np.asarray(p0, float), np.asarray(p1, float)).max()
@@ -130,7 +132,7 @@ def _verifier_ligne(sc, p0, p1, nom):
 def test_reperes_identite():
     """Avec deux repères identité, le résultat est celui de la cinématique du robot sans repères."""
     q = np.array([[20.0, 25.0, 30.0, 40.0], [5.0, 10.0, 35.0, -120.0]])
-    xyz_rz = dt.delta4.DeltaForward4(q)
+    xyz_rz = dt.DeltaForward4(q)
 
     pose = dt.delta_forward_with_frames(q, IDENT, IDENT).as_pose()
     assert np.allclose(pose[:, :3], xyz_rz[:, :3]) and np.allclose(pose[:, 5], xyz_rz[:, 3])
@@ -344,6 +346,102 @@ def test_calibration_outil():
     print(f"calibration outil : exacte ; avec bruit de 0.05 mm, erreur = {erreur:.3f} mm ; rotation Z seule refusée")
 
 
+def test_poses4_et_repere_identite():
+    """Les poses [x, y, z, rz] <-> angles passent par les transformées, sans perdre les rotations > 180°."""
+    tool, user = dt.tool_frame_from_pose(OUTIL_CRAYON), dt.user_frame_from_pose(USER_TABLE)
+    poses = np.array([[-40.0, -30.0, 20.0, 0.0], [10.0, 20.0, 40.0, 100.0], [60.0, 50.0, 60.0, 270.0]])
+
+    # Orientation du TCP : même résultat que la formule R_user^T Rz(rz) R_tool écrite dans ce fichier de test
+    cible = dt.tcp_pose_from_poses4(poses, tool, user)
+    attendue = _poses_cible(user, tool, poses[:, :3], poses[:, 3])
+    assert np.allclose(cible.as_hom_mat(), attendue.as_hom_mat(), atol=1e-12)
+
+    # Sans repères les poses sont dans la base (z négatif sous les moteurs), pas dans le repère de la table
+    poses_base = np.array([[0.0, 0.0, -300.0, 0.0], [100.0, 150.0, -350.0, 100.0], [-80.0, 60.0, -320.0, 270.0]])
+
+    for nom, outil, repere, p in (("repères", tool, user, poses), ("identité (None)", None, None, poses_base)):
+        angles = dt.delta_inverse_from_poses4(p, outil, repere)
+        assert not np.isnan(angles).any(), f"{nom} : pose inatteignable"
+        assert np.isclose(angles[2, 3], 270.0), f"{nom} : la rotation de 270° ne doit pas être repliée à -90°"
+        retour = dt.delta_forward_to_poses4(angles, outil, repere)
+        assert np.allclose(retour, p, atol=1e-6), f"{nom} : aller-retour poses -> angles -> poses"
+
+    # None doit donner exactement la cinématique brute de la bride dans la base
+    assert np.allclose(dt.delta_inverse_from_poses4(poses_base), dt.DeltaInverse4(poses_base), atol=1e-12)
+    print("poses [x,y,z,rz] : aller-retour exact avec repères, rz = 270° conservé, None = cinématique brute")
+
+
+def test_trajectoires_sans_reperes_inchangees():
+    """Sans repères (None = identité), les trajectoires de trajectoires4Axes sont celles de la cinématique brute."""
+    p0, p1 = [-200, 200, -200, 0], [175, -250, -350, 180]
+
+    traj, duree = tr.cartesian_trapezoidal_trajectory(p0, p1, v_max_mm_s=200.0, a_max_mm_s2=500.0, dt=0.01)
+    ident, _ = tr.cartesian_trapezoidal_trajectory(p0, p1, v_max_mm_s=200.0, a_max_mm_s2=500.0, dt=0.01,
+                                                   tool_frame=IDENT, user_frame=IDENT)
+    assert np.allclose(traj, ident, atol=1e-12), "None et identité explicite doivent donner le même résultat"
+
+    xyz_rz = dt.DeltaForward4(traj)
+    ecart = _ecart_a_la_droite(xyz_rz[:, :3], np.array(p0[:3], float), np.array(p1[:3], float)).max()
+    assert ecart < 1e-6 and np.allclose(xyz_rz[-1], p1, atol=1e-6), f"ligne droite de la bride : écart {ecart:.2e} mm"
+
+    for nom, (angles, _) in (("jointmotangles", tr.jointmotangles(p0, p1, 0.5, 250)),
+                             ("jointmotangles_trapezoidal", tr.jointmotangles_trapezoidal(p0, p1, 30.0, 60.0))):
+        assert np.allclose(angles[0], dt.DeltaInverse4(p0)[0], atol=1e-12), f"{nom} : départ différent de la cinématique brute"
+        assert np.allclose(angles[-1], dt.DeltaInverse4(p1)[0], atol=1e-12), f"{nom} : arrivée différente de la cinématique brute"
+    print(f"trajectoires sans repères : identiques à la cinématique brute (ligne droite à {ecart:.2e} mm, durée {duree:.2f} s)")
+
+
+def test_trajectoires_avec_reperes():
+    """Les trois trajectoires, avec outil excentré et repère utilisateur : le TCP part et arrive aux bonnes poses."""
+    tool, user = dt.tool_frame_from_pose(OUTIL_CRAYON), dt.user_frame_from_pose(USER_TABLE)
+    depart, arrivee = [-40, -30, 20, 0], [60, 50, 60, 90]
+    longueur = np.linalg.norm(np.array(arrivee[:3]) - np.array(depart[:3]))
+
+    # Ligne droite cartésienne : le TCP suit la droite, à la vitesse demandée
+    v_max, a_max = 100.0, 300.0
+    angles, duree = tr.cartesian_trapezoidal_trajectory(depart, arrivee, v_max_mm_s=v_max, a_max_mm_s2=a_max,
+                                                        dt=0.01, tool_frame=tool, user_frame=user)
+    poses = dt.delta_forward_to_poses4(angles, tool, user)
+    ecart = _ecart_a_la_droite(poses[:, :3], np.array(depart[:3], float), np.array(arrivee[:3], float)).max()
+    vitesse_tcp = np.linalg.norm(np.diff(poses[:, :3], axis=0), axis=1) / (duree / (len(poses) - 1))
+    assert ecart < 1e-6, f"le TCP quitte la droite de {ecart:.2e} mm"
+    assert np.allclose(poses[0], depart, atol=1e-6) and np.allclose(poses[-1], arrivee, atol=1e-6)
+    assert vitesse_tcp.max() <= v_max * 1.001, f"vitesse du TCP {vitesse_tcp.max():.1f} mm/s > {v_max} mm/s"
+    # Durée attendue : le mouvement le plus contraignant (TCP ou moteur 4) fixe le profil de l'avancement λ
+    rotation = abs(arrivee[3] - depart[3]) / abs(dt.RAPPORT_AXE4)
+    v_lambda = min(v_max / longueur, tr.V_MAX_AXE4_DEG_S / rotation)
+    a_lambda = min(a_max / longueur, tr.A_MAX_AXE4_DEG_S2 / rotation)
+    assert abs(duree - (1 / v_lambda + v_lambda / a_lambda)) < 0.02, "durée différente du profil trapézoïdal attendu"
+    assert np.all(np.diff(poses[:, 3]) >= -1e-9), "rz doit croître régulièrement"
+
+    # Trajectoires articulaires : seuls les points de départ et d'arrivée sont des poses demandées
+    for nom, (q, _) in (("jointmotangles", tr.jointmotangles(depart, arrivee, 0.5, 250, tool_frame=tool, user_frame=user)),
+                        ("jointmotangles_trapezoidal", tr.jointmotangles_trapezoidal(depart, arrivee, 30.0, 60.0,
+                                                                                    tool_frame=tool, user_frame=user))):
+        bouts = dt.delta_forward_to_poses4(q[[0, -1]], tool, user)
+        assert np.allclose(bouts, [depart, arrivee], atol=1e-6), f"{nom} : le TCP ne part/n'arrive pas aux poses demandées"
+
+    # Rotation de plus d'un demi-tour : θ4 continu, sans saut de 360°
+    angles, _ = tr.cartesian_trapezoidal_trajectory([-20, 0, 30, 0], [20, 0, 30, 270], v_max_mm_s=100.0, a_max_mm_s2=300.0,
+                                                    dt=0.01, tool_frame=tool, user_frame=user)
+    assert np.isclose(angles[-1, 3], 270.0) and np.abs(np.diff(angles[:, 3])).max() < 5.0, "θ4 discontinu ou replié"
+    print(f"trajectoires avec repères : TCP droit à {ecart:.2e} mm, vitesse max {vitesse_tcp.max():.1f} mm/s, "
+          f"durée {duree:.2f} s ; rotation de 270° sans saut")
+
+
+def test_trajectoire_inatteignable_avec_reperes():
+    """Une trajectoire dont le TCP sort de l'espace de travail est refusée (ValueError), comme sans repères."""
+    tool, user = dt.tool_frame_from_pose(OUTIL_CRAYON), dt.user_frame_from_pose(USER_TABLE)
+    try:
+        tr.cartesian_trapezoidal_trajectory([0, 0, 30, 0], [900, 0, 30, 0], 100.0, 300.0, dt=0.01,
+                                            tool_frame=tool, user_frame=user)
+    except ValueError as erreur:
+        assert "inatteignable" in str(erreur)
+    else:
+        raise AssertionError("une ValueError était attendue pour une arrivée hors de l'espace de travail")
+    print("trajectoire hors espace de travail avec repères : refusée par une ValueError")
+
+
 def test_formes_et_entrees_invalides():
     """Les entrées incorrectes lèvent une ValueError au lieu de donner un résultat faux."""
     cas = {
@@ -365,6 +463,57 @@ def test_formes_et_entrees_invalides():
     print(f"entrées invalides : {len(cas)} cas refusés par une ValueError")
 
 
+def test_entrees_limites_trajectoires():
+    """Valeurs absurdes (NaN, infini, pas nul, repère du mauvais type, dt minuscule) : erreur claire.
+
+    Aucun plantage obscur (AttributeError, RuntimeWarning, calcul interminable) ne doit sortir.
+    """
+    A, B = [0, 0, -300, 0], [50, 0, -300, 90]
+    outil = dt.tool_frame_from_pose(OUTIL_CRAYON)
+    erreurs_valeur = {
+        "pose NaN": lambda: tr.cartesian_trapezoidal_trajectory([np.nan, 0, -300, 0], B, 100, 400),
+        "pose infinie": lambda: tr.jointmotangles_trapezoidal([np.inf, 0, -300, 0], B, 60, 120),
+        "pose de 5 valeurs": lambda: tr.lineartrajectory([0, 0, -300, 0, 0], B, 1.0),
+        "outil NaN": lambda: dt.tool_frame_from_pose([np.nan, 0, 0, 0, 0, 0]),
+        "repère utilisateur infini": lambda: dt.user_frame_from_pose([np.inf, 0, 0, 0, 0, 0]),
+        "v_max infinie": lambda: tr.cartesian_trapezoidal_trajectory(A, B, np.inf, 400),
+        "dt nul": lambda: tr.cartesian_trapezoidal_trajectory(A, B, 100, 400, dt=0),
+        "dt minuscule (trop de points)": lambda: tr.cartesian_trapezoidal_trajectory(A, B, 1, 400, dt=1e-7),
+        "distance énorme": lambda: tr.lineartrajectory(A, [1e9, 0, -300, 0], 1.0),
+        "deg_per_step nul": lambda: tr.jointmotangles(A, B, 0),
+        "deg_per_step négatif": lambda: tr.jointmotangles(A, B, -1),
+        "steps_per_second nul": lambda: tr.jointmotangles(A, B, 2, steps_per_second=0),
+    }
+    for nom, appel in erreurs_valeur.items():
+        try:
+            appel()
+        except ValueError:
+            continue
+        raise AssertionError(f"{nom} : une ValueError était attendue")
+
+    erreurs_type = {
+        "outil donné en chaîne": lambda: tr.cartesian_trapezoidal_trajectory(A, B, 100, 400, tool_frame="x"),
+        "outil donné en matrice numpy": lambda: tr.jointmotangles(A, B, 2, tool_frame=np.eye(4)),
+        "repère utilisateur en liste": lambda: dt.delta_inverse_from_poses4([A], user_frame=[0] * 6),
+    }
+    for nom, appel in erreurs_type.items():
+        try:
+            appel()
+        except TypeError:
+            continue
+        raise AssertionError(f"{nom} : une TypeError était attendue")
+
+    # Cas dégénérés valides : aucune erreur, résultat cohérent
+    angles, duree = tr.cartesian_trapezoidal_trajectory([0, 0, -380, 0], [0, 0, -380, 0], 100, 400, tool_frame=outil)
+    assert angles.shape == (1, 4) and duree == 0.0, "départ = arrivée : une seule pose, durée nulle"
+    angles, duree = tr.cartesian_trapezoidal_trajectory([0, 0, -380, 0], [0, 0, -380, 180], 100, 400, tool_frame=outil)
+    assert len(angles) > 1 and duree > 0, "rotation seule sur place"
+    assert dt.delta_inverse_from_poses4(np.empty((0, 4))).shape == (0, 4), "aucune pose"
+    avant_nan = dt.delta_forward_with_frames([np.nan] * 4, outil, None)
+    assert np.isnan(avant_nan.translation).all(), "angles NaN -> pose NaN, sans exception"
+    print(f"entrées limites : {len(erreurs_valeur)} ValueError, {len(erreurs_type)} TypeError, 4 cas dégénérés valides")
+
+
 # ============================================================================
 #                      GRAPHIQUES
 # ============================================================================
@@ -377,7 +526,7 @@ def _vecteurs_outil(sc, pas=10):
 
 def figure_lignes():
     """Ligne + rotation, pivot, écart à la droite, angles moteurs."""
-    couleurs = dt.delta4.COULEURS_MOTEURS
+    couleurs = tr.COULEURS_MOTEURS
     tool, user = dt.tool_frame_from_pose(OUTIL_CRAYON), dt.user_frame_from_pose(USER_TABLE)
     p0, p1 = np.array([-40.0, -30.0, 20.0]), np.array([60.0, 50.0, 60.0])
     ligne = _scenario_ligne(tool, user, p0, p1, rz0=0, rz1=90)
@@ -429,7 +578,7 @@ def figure_lignes():
 
 def figure_repere_incline():
     """Vue 3D : plan de travail incliné de 10°, ligne du TCP dans ce plan, crayon et bride."""
-    couleurs = dt.delta4.COULEURS_MOTEURS
+    couleurs = tr.COULEURS_MOTEURS
     tool, user = dt.tool_frame_from_pose(OUTIL_CRAYON), dt.user_frame_from_pose(USER_INCLINE)
     p0, p1 = [-50, -40, 30], [50, 40, 30]
     sc = _scenario_ligne(tool, user, p0, p1, n=51)
@@ -441,8 +590,8 @@ def figure_repere_incline():
     fig = plt.figure(figsize=(9, 7))
     ax = fig.add_subplot(projection="3d")
     plan = vers_base([[-80, -70, 0], [80, -70, 0], [80, 70, 0], [-80, 70, 0], [-80, -70, 0]])
-    ax.plot(*plan.T, color=dt.delta4.AXES, lw=1.5)
-    ax.plot_trisurf(plan[:4, 0], plan[:4, 1], plan[:4, 2], color=dt.delta4.GRILLE, alpha=0.5)
+    ax.plot(*plan.T, color=tr.AXES, lw=1.5)
+    ax.plot_trisurf(plan[:4, 0], plan[:4, 1], plan[:4, 2], color=tr.GRILLE, alpha=0.5)
     origine = vers_base([0, 0, 0])
     for axe, couleur, nom in (([40, 0, 0], "#d6342a", "X"), ([0, 40, 0], "#1baf7a", "Y"), ([0, 0, 40], "#2a78d6", "Z")):
         fin = vers_base(axe)
@@ -475,9 +624,14 @@ TESTS = [
     test_repere_utilisateur_incline,
     test_hors_espace_de_travail,
     test_formes_de_sortie,
+    test_poses4_et_repere_identite,
+    test_trajectoires_sans_reperes_inchangees,
+    test_trajectoires_avec_reperes,
+    test_trajectoire_inatteignable_avec_reperes,
     test_calibration_repere_utilisateur,
     test_calibration_outil,
     test_formes_et_entrees_invalides,
+    test_entrees_limites_trajectoires,
 ]
 
 

@@ -4,6 +4,17 @@ Trajectoires et diagrammes temps du robot delta 4 axes.
 Les moteurs 1, 2 et 3 actionnent les bras et positionnent le plateau en XYZ.
 Le moteur 4 fait tourner le plateau autour de Z (rotation parallèle au sol).
 
+Repères outil et utilisateur
+----------------------------
+Toutes les trajectoires passent par les transformées de delta_transform.py :
+    T_base_flange = T_base_user @ T_user_tcp @ T_flange_tool⁻¹
+Les poses [x, y, z, rz] sont celles du TCP (origine du repère outil) dans le repère
+utilisateur. Les arguments tool_frame et user_frame (RigidTransform, voir
+tool_frame_from_pose / user_frame_from_pose / calibrate_*) sont optionnels : sans eux,
+ce sont des matrices identité, et la pose est celle de la bride dans la base.
+rz reste la rotation de la plateforme autour de Z de la base (angle du 4ème axe) :
+la bride d'un delta est toujours horizontale, rz est donc la seule orientation libre.
+
 Conventions
 -----------
 - Pose cartésienne : [x, y, z, rz]  (mm, mm, mm, degrés)
@@ -14,16 +25,11 @@ Conventions
 
 Modèle du 4ème axe
 ------------------
-Le plateau d'un robot delta reste toujours parallèle à la base. La rotation rz
-du plateau est donc indépendante de la position XYZ, et l'angle du moteur 4 vaut :
-
-    θ4 = RAPPORT_AXE4 * rz + OFFSET_AXE4
-
-Ce modèle est valable que le moteur 4 soit fixé sur la base (arbre télescopique
-à deux cardans) ou directement sur le plateau.
+θ4 = RAPPORT_AXE4 * rz + OFFSET_AXE4. Ces paramètres sont définis dans
+delta_transform.py (RAPPORT_AXE4, OFFSET_AXE4), avec axe4_inverse / axe4_direct.
 """
 
-import importlib.util
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -32,33 +38,18 @@ import matplotlib.pyplot as plt
 # Dossier racine du projet : le dossier « Output » des images y est créé.
 RACINE_PROJET = Path(__file__).resolve().parent.parent
 
-# Cinématique du robot (version à jour) : « DeltaCoord_fixed (1).py », à côté de
-# ce script. Son nom (espace et parenthèses) interdit « import » : on charge le
-# fichier par son chemin, ce qui marche quel que soit le dossier de lancement.
-FICHIER_DELTACOORD = Path(__file__).resolve().parent / "DeltaCoord_fixed (1).py"
+# Repères outil / utilisateur et cinématique 4 axes : delta_transform.py, dans le dossier M2.
+sys.path.insert(0, str(RACINE_PROJET / "M2"))
+import delta_transform as tf                              # noqa: E402
+from delta_transform import (DeltaForward4, DeltaInverse4,  # noqa: E402,F401
+                             axe4_direct, axe4_inverse)
 
-
-def _charger_module(nom, chemin):
-    """Charge un fichier Python par son chemin et retourne le module."""
-    spec = importlib.util.spec_from_file_location(nom, chemin)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-d1 = _charger_module("DeltaCoord_fixed_v1", FICHIER_DELTACOORD)
+d1 = tf.d1      # cinématique à 3 bras (« DeltaCoord_fixed (1).py »)
 
 
 # ============================================================================
-#                      PARAMÈTRES DU 4ÈME AXE (À ADAPTER)
+#                      LIMITES DU MOTEUR 4 (À ADAPTER)
 # ============================================================================
-
-# Tours du moteur 4 pour un tour du plateau (réducteur, poulies...).
-# 1.0 = entraînement direct.
-RAPPORT_AXE4 = 1.0
-
-# Angle du moteur 4 (degrés) quand le plateau est à rz = 0.
-OFFSET_AXE4 = 0.0
 
 # Limites du moteur 4, en degrés MOTEUR. Valeurs d'exemple : à remplacer par
 # celles du moteur réellement monté.
@@ -81,18 +72,11 @@ EPAISSEUR_TRAIT = 1.5
 
 
 # ============================================================================
-#                      CINÉMATIQUE 4 AXES
+#                      POSES ET CINÉMATIQUE 4 AXES
 # ============================================================================
-
-def axe4_inverse(rz_deg):
-    """Convertit la rotation du plateau rz (degrés) en angle du moteur 4 (degrés)."""
-    return RAPPORT_AXE4 * np.asarray(rz_deg, dtype=float) + OFFSET_AXE4
-
-
-def axe4_direct(theta4_deg):
-    """Convertit l'angle du moteur 4 (degrés) en rotation du plateau rz (degrés)."""
-    return (np.asarray(theta4_deg, dtype=float) - OFFSET_AXE4) / RAPPORT_AXE4
-
+# DeltaInverse4 / DeltaForward4 (cinématique de la bride dans la base, sans repères),
+# axe4_inverse et axe4_direct sont définies dans delta_transform.py et importées plus haut.
+# Les trajectoires ci-dessous utilisent tf.delta_inverse_from_poses4, qui applique les repères.
 
 def _pose4(pose, rz_defaut=0.0):
     """Retourne une pose [x, y, z, rz] en float. Une pose [x, y, z] reçoit rz = rz_defaut."""
@@ -101,44 +85,9 @@ def _pose4(pose, rz_defaut=0.0):
         p = np.append(p, rz_defaut)
     if p.size != 4:
         raise ValueError(f"Pose attendue [x, y, z, rz] ou [x, y, z], reçu : {pose}")
+    if not np.isfinite(p).all():
+        raise ValueError(f"Pose avec NaN ou infini : {pose}")
     return p
-
-
-def DeltaInverse4(poses):
-    """Cinématique inverse du robot delta 4 axes.
-
-    Args:
-        poses (array-like): pose [x, y, z, rz] ou array de shape (n, 4)
-
-    Returns:
-        numpy.ndarray: array de shape (n, 4) avec [θ1, θ2, θ3, θ4] en degrés.
-            Les angles des bras valent NaN si la position est hors de portée.
-    """
-    p = np.atleast_2d(np.asarray(poses, dtype=float))
-    if p.ndim != 2 or p.shape[1] != 4:
-        raise ValueError(f"Poses attendues de shape (n, 4), reçu {p.shape}")
-
-    angles_bras = np.asarray(d1.DeltaInverse(p[:, :3])).reshape(-1, 3)
-    theta4 = axe4_inverse(p[:, 3])
-    return np.column_stack((angles_bras, theta4))
-
-
-def DeltaForward4(angles):
-    """Cinématique directe du robot delta 4 axes.
-
-    Args:
-        angles (array-like): angles [θ1, θ2, θ3, θ4] ou array de shape (n, 4), en degrés
-
-    Returns:
-        numpy.ndarray: array de shape (n, 4) avec [x, y, z, rz] (mm et degrés)
-    """
-    q = np.atleast_2d(np.asarray(angles, dtype=float))
-    if q.ndim != 2 or q.shape[1] != 4:
-        raise ValueError(f"Angles attendus de shape (n, 4), reçu {q.shape}")
-
-    xyz = np.asarray(d1.DeltaForward(q[:, :3])).reshape(-1, 3)
-    rz = axe4_direct(q[:, 3])
-    return np.column_stack((xyz, rz))
 
 
 def _poses_depart_arrivee(start, end, plus_court_chemin=False):
@@ -171,13 +120,17 @@ def _poses_depart_arrivee(start, end, plus_court_chemin=False):
 
 
 def _verifier_atteignable(angles, poses):
-    """Lève une ValueError si une pose de la trajectoire est hors de l'espace de travail."""
+    """Lève une ValueError si une pose de la trajectoire est inatteignable.
+
+    Une pose est inatteignable si elle est hors de l'espace de travail, ou si les repères
+    imposent une bride inclinée (la plateforme d'un delta reste horizontale).
+    """
     invalides = np.isnan(angles).any(axis=1)
     if invalides.any():
         i = int(np.flatnonzero(invalides)[0])
         raise ValueError(
-            f"Pose hors de l'espace de travail : {np.round(poses[i], 2)} "
-            f"(point {i} de la trajectoire)"
+            f"Pose inatteignable (hors de l'espace de travail ou bride qui devrait s'incliner) : "
+            f"{np.round(poses[i], 2)} (point {i} de la trajectoire)"
         )
 
 
@@ -207,10 +160,23 @@ def _verifier_chemin_articulaire(angles, tolerance_deg=1e-3):
 
 
 def _verifier_limites(**limites):
-    """Lève une ValueError si une vitesse, une accélération ou un pas de temps n'est pas > 0."""
+    """Lève une ValueError si une vitesse, une accélération ou un pas n'est pas fini et > 0."""
     for nom, valeur in limites.items():
-        if not valeur > 0:
+        if not (np.isfinite(valeur) and valeur > 0):
             raise ValueError(f"{nom} doit être strictement positif (reçu {valeur})")
+
+
+# Au-delà, un pas ou un dt minuscule ferait attendre très longtemps ou saturerait la mémoire.
+MAX_ECHANTILLONS = 2_000_000
+
+
+def _verifier_nb_echantillons(n):
+    """Lève une ValueError si une trajectoire dépasserait MAX_ECHANTILLONS points."""
+    if n > MAX_ECHANTILLONS:
+        raise ValueError(
+            f"Trajectoire de {n:.3g} points (maximum {MAX_ECHANTILLONS}) : "
+            f"augmenter le pas (dt, stepsmm, stepsdeg, deg_per_step) ou raccourcir le mouvement"
+        )
 
 
 # ============================================================================
@@ -266,8 +232,9 @@ def _axe_temps(T, dt):
     Le dernier échantillon tombe exactement sur T : la trajectoire finit bien
     sur la pose d'arrivée, et timediagram retrouve les bons instants.
     """
-    n = max(1, int(np.ceil(T / dt - 1e-9)))
-    return np.linspace(0.0, T, n + 1)
+    n_reel = max(1.0, np.ceil(T / dt - 1e-9))
+    _verifier_nb_echantillons(n_reel)
+    return np.linspace(0.0, T, int(n_reel) + 1)
 
 
 def _facteur_ralentissement_bras(angles, T, v_max_deg_s, a_max_deg_s2):
@@ -304,6 +271,10 @@ def lineartrajectory(start, end, stepsmm, stepsdeg=1.0, plus_court_chemin=False)
     La rotation rz est interpolée en même temps que la position. Aucun pas ne
     dépasse stepsmm en translation ni stepsdeg en rotation.
 
+    Les poses sont celles du TCP dans le repère utilisateur : la droite est donc
+    une droite du TCP. Cette fonction ne calcule pas d'angles ; pour les obtenir,
+    passer les poses à tf.delta_inverse_from_poses4(poses, tool_frame, user_frame).
+
     Args:
         start (array-like): pose initiale [x, y, z, rz]
         end (array-like): pose finale [x, y, z, rz]
@@ -321,11 +292,13 @@ def lineartrajectory(start, end, stepsmm, stepsdeg=1.0, plus_court_chemin=False)
 
     distance = np.linalg.norm(p1[:3] - p0[:3])
     rotation = abs(p1[3] - p0[3])
-    steps = max(int(np.ceil(distance / stepsmm)), int(np.ceil(rotation / stepsdeg)), 1)
-    return np.linspace(p0, p1, steps + 1)
+    steps = max(np.ceil(distance / stepsmm), np.ceil(rotation / stepsdeg), 1.0)
+    _verifier_nb_echantillons(steps)
+    return np.linspace(p0, p1, int(steps) + 1)
 
 
-def jointmotangles(start, end, deg_per_step, steps_per_second=1.0, plus_court_chemin=False):
+def jointmotangles(start, end, deg_per_step, steps_per_second=1.0, plus_court_chemin=False,
+                   tool_frame=None, user_frame=None):
     """Trajectoire articulaire linéaire (vitesse constante) sur les 4 moteurs.
 
     Le moteur qui a le plus grand angle à parcourir avance de deg_per_step par
@@ -337,32 +310,34 @@ def jointmotangles(start, end, deg_per_step, steps_per_second=1.0, plus_court_ch
     droite en XYZ, utiliser cartesian_trapezoidal_trajectory.
 
     Args:
-        start (array-like): pose initiale [x, y, z, rz]
-        end (array-like): pose finale [x, y, z, rz]
+        start (array-like): pose initiale [x, y, z, rz] du TCP dans le repère utilisateur
+        end (array-like): pose finale [x, y, z, rz] du TCP dans le repère utilisateur
         deg_per_step (float): déplacement du moteur principal par pas (degrés)
         steps_per_second (float): nombre de pas par seconde
         plus_court_chemin (bool): faire tourner rz par le plus court chemin
             (180° au plus). Le rz d'arrivée est alors remplacé par un équivalent
             modulo 360° : voir _poses_depart_arrivee.
+        tool_frame (RigidTransform): T_flange_tool, défaut identité
+        user_frame (RigidTransform): T_base_user, défaut identité
 
     Returns:
         tuple:
             numpy.ndarray: angles [θ1, θ2, θ3, θ4] de shape (n_steps + 1, 4)
             float: durée du mouvement en secondes
     """
+    _verifier_limites(deg_per_step=deg_per_step, steps_per_second=steps_per_second)
     p0, p1 = _poses_depart_arrivee(start, end, plus_court_chemin)
     poses = np.vstack((p0, p1))
-    q0, q1 = DeltaInverse4(poses)
+    q0, q1 = tf.delta_inverse_from_poses4(poses, tool_frame, user_frame)
     _verifier_atteignable(np.vstack((q0, q1)), poses)
 
     max_delta = np.max(np.abs(q1 - q0))
-    if max_delta == 0 or deg_per_step == 0:
+    if max_delta == 0:
         return np.array([q0], dtype=float), 0.0
 
-    if steps_per_second <= 0:
-        raise ValueError("steps_per_second doit être strictement positif")
-
-    n_steps = max(1, int(np.ceil(max_delta / abs(deg_per_step))))
+    n_reel = max(1.0, np.ceil(max_delta / deg_per_step))
+    _verifier_nb_echantillons(n_reel)
+    n_steps = int(n_reel)
     duration_sec = n_steps / steps_per_second
     trajectoire = np.linspace(q0, q1, n_steps + 1)
     _verifier_chemin_articulaire(trajectoire)
@@ -371,7 +346,7 @@ def jointmotangles(start, end, deg_per_step, steps_per_second=1.0, plus_court_ch
 
 def jointmotangles_trapezoidal(start, end, v_max_deg_s, a_max_deg_s2, dt=0.001,
                                v_max_axe4_deg_s=None, a_max_axe4_deg_s2=None,
-                               plus_court_chemin=False):
+                               plus_court_chemin=False, tool_frame=None, user_frame=None):
     """Trajectoire articulaire synchronisée à profils trapézoïdaux sur les 4 moteurs.
 
     Chaque moteur suit un profil accélération / vitesse constante / décélération.
@@ -389,8 +364,8 @@ def jointmotangles_trapezoidal(start, end, v_max_deg_s, a_max_deg_s2, dt=0.001,
     cartesian_trapezoidal_trajectory.
 
     Args:
-        start (array-like): pose initiale [x, y, z, rz]
-        end (array-like): pose finale [x, y, z, rz]
+        start (array-like): pose initiale [x, y, z, rz] du TCP dans le repère utilisateur
+        end (array-like): pose finale [x, y, z, rz] du TCP dans le repère utilisateur
         v_max_deg_s (float): vitesse max des moteurs des bras (degrés/s)
         a_max_deg_s2 (float): accélération max des moteurs des bras (degrés/s²)
         dt (float): pas de temps maximal (s), défaut 0.001
@@ -401,6 +376,8 @@ def jointmotangles_trapezoidal(start, end, v_max_deg_s, a_max_deg_s2, dt=0.001,
         plus_court_chemin (bool): faire tourner rz par le plus court chemin
             (180° au plus). Le rz d'arrivée est alors remplacé par un équivalent
             modulo 360° : voir _poses_depart_arrivee.
+        tool_frame (RigidTransform): T_flange_tool, défaut identité
+        user_frame (RigidTransform): T_base_user, défaut identité
 
     Returns:
         tuple:
@@ -414,7 +391,7 @@ def jointmotangles_trapezoidal(start, end, v_max_deg_s, a_max_deg_s2, dt=0.001,
 
     p0, p1 = _poses_depart_arrivee(start, end, plus_court_chemin)
     poses = np.vstack((p0, p1))
-    q0, q1 = DeltaInverse4(poses)
+    q0, q1 = tf.delta_inverse_from_poses4(poses, tool_frame, user_frame)
     _verifier_atteignable(np.vstack((q0, q1)), poses)
 
     v_max = np.array([v_max_deg_s] * 3 + [v4], dtype=float)
@@ -441,14 +418,19 @@ def jointmotangles_trapezoidal(start, end, v_max_deg_s, a_max_deg_s2, dt=0.001,
 def cartesian_trapezoidal_trajectory(start, end, v_max_mm_s, a_max_mm_s2, dt=0.001,
                                      v_max_axe4_deg_s=None, a_max_axe4_deg_s2=None,
                                      plus_court_chemin=False,
-                                     v_max_deg_s=None, a_max_deg_s2=None):
+                                     v_max_deg_s=None, a_max_deg_s2=None,
+                                     tool_frame=None, user_frame=None):
     """Ligne droite en XYZ et rotation rz synchronisées, avec profil trapézoïdal.
 
     La translation et la rotation partagent le même profil normalisé
     λ(t) de 0 à 1 :
         pose(t) = départ + λ(t) * (arrivée - départ)
-    Le plateau suit donc une ligne droite et tourne proportionnellement à
-    l'avancement. Le mouvement le plus lent (translation ou rotation) fixe la
+    Le TCP (origine du repère outil) suit donc une ligne droite dans le repère
+    utilisateur, et le plateau tourne proportionnellement à l'avancement. Si l'outil
+    est excentré, la bride, elle, décrit une courbe pendant la rotation : c'est
+    delta_inverse_with_frames qui la calcule à chaque échantillon.
+    Les vitesses et accélérations linéaires v_max_mm_s et a_max_mm_s2 sont celles du TCP.
+    Le mouvement le plus lent (translation ou rotation) fixe la
     durée, et l'autre est ralenti pour finir en même temps.
 
     Les limites de rotation du plateau sont déduites de celles du moteur 4 en
@@ -478,6 +460,8 @@ def cartesian_trapezoidal_trajectory(start, end, v_max_mm_s, a_max_mm_s2, dt=0.0
         v_max_deg_s (float): vitesse max des moteurs des bras (degrés/s), optionnel
         a_max_deg_s2 (float): accélération max des moteurs des bras (degrés/s²),
             optionnel. À donner en même temps que v_max_deg_s.
+        tool_frame (RigidTransform): T_flange_tool, défaut identité
+        user_frame (RigidTransform): T_base_user, défaut identité
 
     Returns:
         tuple:
@@ -500,7 +484,7 @@ def cartesian_trapezoidal_trajectory(start, end, v_max_mm_s, a_max_mm_s2, dt=0.0
     rotation = abs(delta[3])                  # degrés plateau
 
     if distance == 0.0 and rotation == 0.0:
-        q0 = DeltaInverse4(p0)
+        q0 = tf.delta_inverse_from_poses4(p0, tool_frame, user_frame)
         _verifier_atteignable(q0, np.atleast_2d(p0))
         return q0, 0.0
 
@@ -510,7 +494,7 @@ def cartesian_trapezoidal_trajectory(start, end, v_max_mm_s, a_max_mm_s2, dt=0.0
         v_lambda = min(v_lambda, v_max_mm_s / distance)
         a_lambda = min(a_lambda, a_max_mm_s2 / distance)
     if rotation > 0.0:
-        rapport = abs(RAPPORT_AXE4)
+        rapport = abs(tf.RAPPORT_AXE4)
         v_lambda = min(v_lambda, (v4 / rapport) / rotation)
         a_lambda = min(a_lambda, (a4 / rapport) / rotation)
 
@@ -526,7 +510,7 @@ def cartesian_trapezoidal_trajectory(start, end, v_max_mm_s, a_max_mm_s2, dt=0.0
         lam = _profil_trapeze(temps, 1.0, t_total, a_l)
 
         poses = p0 + lam[:, np.newaxis] * delta
-        angles = DeltaInverse4(poses)
+        angles = tf.delta_inverse_from_poses4(poses, tool_frame, user_frame)
         _verifier_atteignable(angles, poses)
 
         if not limiter_bras:
@@ -705,6 +689,25 @@ def test(dossier_sortie=None, afficher=True):
                       "Ligne droite cartésienne avec rotation – robot delta 4 axes")
     if fig:
         chemin = dossier / "trajectoire4axes_lineaire.png"
+        fig.savefig(chemin, dpi=150, bbox_inches="tight")
+        print(f"Graphique sauvegardé : {chemin}")
+
+    print("\n" + "=" * 70)
+    print("TEST 4 : Ligne droite du TCP avec outil excentré (crayon à 45°) et repère utilisateur")
+    print("=" * 70)
+    crayon = tf.tool_frame_from_pose([30, 0, -80, 0, 45, 0])       # TCP décalé de 30 mm, incliné de 45°
+    table = tf.user_frame_from_pose([20, -30, -400, 0, 0, 15])     # table 400 mm sous la base, tournée de 15°
+    traj_tcp, duree_tcp = cartesian_trapezoidal_trajectory(
+        [-40, -30, 20, 0], [60, 50, 60, 90],
+        v_max_mm_s=100.0, a_max_mm_s2=300.0, dt=0.01,
+        v_max_deg_s=30.0, a_max_deg_s2=60.0,
+        tool_frame=crayon, user_frame=table
+    )
+    resume_trajectoire(traj_tcp, duree_tcp)
+    fig = timediagram(traj_tcp, duree_tcp,
+                      "Ligne droite du TCP – crayon à 45° sur une table décalée")
+    if fig:
+        chemin = dossier / "trajectoire4axes_reperes.png"
         fig.savefig(chemin, dpi=150, bbox_inches="tight")
         print(f"Graphique sauvegardé : {chemin}")
 

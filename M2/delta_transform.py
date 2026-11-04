@@ -5,10 +5,10 @@ import numpy as np
 from rigid_transform import RigidTransform
 
 
-# Cinématique du robot delta 4 axes (DeltaInverse4 / DeltaForward4 : [x, y, z, rz] <-> [θ1..θ4]).
-# Le fichier est dans ../Coords ; on le charge par son chemin, ce qui marche quel que soit
-# le dossier de lancement.
-FICHIER_DELTA4 = Path(__file__).resolve().parent.parent / "Coords" / "trajectoires4Axes.py"
+# Cinématique du robot à 3 bras : « DeltaCoord_fixed (1).py », dans ../Coords. Son nom
+# (espace et parenthèses) interdit « import » : on charge le fichier par son chemin, ce qui
+# marche quel que soit le dossier de lancement.
+FICHIER_DELTACOORD = Path(__file__).resolve().parent.parent / "Coords" / "DeltaCoord_fixed (1).py"
 
 
 def _charger_module(nom, chemin):
@@ -19,7 +19,24 @@ def _charger_module(nom, chemin):
     return module
 
 
-delta4 = _charger_module("trajectoires4Axes_delta", FICHIER_DELTA4)
+d1 = _charger_module("DeltaCoord_fixed_v1", FICHIER_DELTACOORD)
+
+# ============================================================================
+#                      MODÈLE DU 4ÈME AXE (À ADAPTER)
+# ============================================================================
+# Le plateau d'un robot delta reste toujours parallèle à la base. La rotation rz du
+# plateau (autour de Z) est donc indépendante de la position XYZ, et l'angle du moteur 4 vaut :
+#
+#     θ4 = RAPPORT_AXE4 * rz + OFFSET_AXE4
+#
+# Ce modèle est valable que le moteur 4 soit fixé sur la base (arbre télescopique à deux
+# cardans) ou directement sur le plateau.
+
+# Tours du moteur 4 pour un tour du plateau (réducteur, poulies...). 1.0 = entraînement direct.
+RAPPORT_AXE4 = 1.0
+
+# Angle du moteur 4 (degrés) quand le plateau est à rz = 0.
+OFFSET_AXE4 = 0.0
 
 # Inclinaison maximale tolérée (degrés) entre la bride demandée et l'horizontale.
 # La plateforme d'un robot delta reste toujours parallèle à la base : seule la rotation
@@ -34,9 +51,68 @@ TOL_INCLINAISON_DEG = 1.0
 CONDITIONNEMENT_MIN = 1e-2
 
 
+def axe4_inverse(rz_deg):
+    """Convertit la rotation du plateau rz (degrés) en angle du moteur 4 (degrés)."""
+    return RAPPORT_AXE4 * np.asarray(rz_deg, dtype=float) + OFFSET_AXE4
+
+
+def axe4_direct(theta4_deg):
+    """Convertit l'angle du moteur 4 (degrés) en rotation du plateau rz (degrés)."""
+    return (np.asarray(theta4_deg, dtype=float) - OFFSET_AXE4) / RAPPORT_AXE4
+
+
+def DeltaInverse4(poses):
+    """Cinématique inverse du robot delta 4 axes, SANS repères (pose de la bride dans la base).
+
+    Args:
+        poses (array-like): pose [x, y, z, rz] ou array de shape (n, 4)
+
+    Returns:
+        numpy.ndarray: array de shape (n, 4) avec [θ1, θ2, θ3, θ4] en degrés.
+            Les angles des bras valent NaN si la position est hors de portée.
+    """
+    p = np.atleast_2d(np.asarray(poses, dtype=float))
+    if p.ndim != 2 or p.shape[1] != 4:
+        raise ValueError(f"Poses attendues de shape (n, 4), reçu {p.shape}")
+
+    angles_bras = np.asarray(d1.DeltaInverse(p[:, :3])).reshape(-1, 3)
+    theta4 = axe4_inverse(p[:, 3])
+    return np.column_stack((angles_bras, theta4))
+
+
+def DeltaForward4(angles):
+    """Cinématique directe du robot delta 4 axes, SANS repères (pose de la bride dans la base).
+
+    Args:
+        angles (array-like): angles [θ1, θ2, θ3, θ4] ou array de shape (n, 4), en degrés
+
+    Returns:
+        numpy.ndarray: array de shape (n, 4) avec [x, y, z, rz] (mm et degrés)
+    """
+    q = np.atleast_2d(np.asarray(angles, dtype=float))
+    if q.ndim != 2 or q.shape[1] != 4:
+        raise ValueError(f"Angles attendus de shape (n, 4), reçu {q.shape}")
+
+    xyz = np.asarray(d1.DeltaForward(q[:, :3])).reshape(-1, 3)
+    rz = axe4_direct(q[:, 3])
+    return np.column_stack((xyz, rz))
+
+
+def _frame_ou_identite(frame) -> RigidTransform:
+    """Le repère donné, ou la transformation identité si frame vaut None (repère inchangé)."""
+    if frame is None:
+        return RigidTransform.identity(1)
+    if not isinstance(frame, RigidTransform):
+        raise TypeError(
+            f"Repère attendu : RigidTransform (tool_frame_from_pose, user_frame_from_pose, "
+            f"calibrate_*) ou None, reçu {type(frame).__name__}"
+        )
+    return frame
+
+
 def _hom(frame: RigidTransform) -> np.ndarray:
     """Matrice homogène (4, 4) d'un repère unique."""
-    mat = frame.as_hom_mat()
+    mat = _frame_ou_identite(frame).as_hom_mat()
     if mat.ndim == 3:
         if mat.shape[0] != 1:
             raise ValueError("Un repère unique est attendu (une seule matrice homogène)")
@@ -74,6 +150,8 @@ def tool_frame_from_pose(pose) -> RigidTransform:
     pose = np.asarray(pose, dtype=float)
     if pose.shape != (6,):
         raise ValueError(f"Pose attendue de shape (6,), reçu {pose.shape}")
+    if not np.isfinite(pose).all():
+        raise ValueError(f"Pose avec NaN ou infini : {pose}")
     return RigidTransform.from_pose(pose, seq='xyz', degrees=True)
 
 
@@ -97,6 +175,8 @@ def user_frame_from_pose(pose) -> RigidTransform:
     pose = np.asarray(pose, dtype=float)
     if pose.shape != (6,):
         raise ValueError(f"Pose attendue de shape (6,), reçu {pose.shape}")
+    if not np.isfinite(pose).all():
+        raise ValueError(f"Pose avec NaN ou infini : {pose}")
     return RigidTransform.from_pose(pose, seq='xyz', degrees=True)
 
 
@@ -129,7 +209,7 @@ def delta_forward_with_frames(angles_4, tool_frame: RigidTransform, user_frame: 
     reduced = angles.ndim == 1
 
     # [x, y, z, rz] de la bride dans la base (NaN si les bras sont impossibles)
-    xyz_rz = delta4.DeltaForward4(angles)
+    xyz_rz = DeltaForward4(angles)
 
     # Le plateau reste parallèle à la base : la bride n'a qu'une rotation rz autour de Z
     rz = np.radians(xyz_rz[:, 3])
@@ -195,10 +275,107 @@ def delta_inverse_with_frames(pose: RigidTransform, tool_frame: RigidTransform, 
     inclinaison = np.degrees(np.arctan2(np.hypot(rot[:, 0, 2], rot[:, 1, 2]), rot[:, 2, 2]))
     rz = np.degrees(np.arctan2(rot[:, 1, 0], rot[:, 0, 0]))
 
-    angles = delta4.DeltaInverse4(np.column_stack((xyz, rz)))
+    angles = DeltaInverse4(np.column_stack((xyz, rz)))
     angles[(inclinaison > tol_inclinaison_deg) | np.isnan(angles).any(axis=1)] = np.nan
 
     return angles[0] if reduced else angles
+
+
+# ============================================================================
+#      POSES [x, y, z, rz] : INTERFACE UTILISÉE PAR LES TRAJECTOIRES
+# ============================================================================
+# Une pose [x, y, z, rz] désigne :
+#   - x, y, z : position du TCP (origine du repère outil) dans le repère utilisateur, en mm ;
+#   - rz      : rotation de la plateforme autour de Z de la base (angle du 4ème axe), en degrés,
+#               sans limite à ±180° (plusieurs tours possibles).
+# Les repères outil et utilisateur valent l'identité s'ils ne sont pas donnés (None) : la pose
+# est alors celle de la bride dans la base, comme avant l'introduction des repères.
+
+def _rot_z(deg) -> np.ndarray:
+    """Matrices de rotation autour de Z, shape (n, 3, 3), pour un array d'angles en degrés."""
+    a = np.radians(np.atleast_1d(deg))
+    rot = np.zeros((len(a), 3, 3))
+    rot[:, 0, 0] = np.cos(a)
+    rot[:, 0, 1] = -np.sin(a)
+    rot[:, 1, 0] = np.sin(a)
+    rot[:, 1, 1] = np.cos(a)
+    rot[:, 2, 2] = 1.0
+    return rot
+
+
+def tcp_pose_from_poses4(poses4, tool_frame=None, user_frame=None) -> RigidTransform:
+    """
+    Construit la pose du TCP dans le repère utilisateur (RigidTransform) à partir de poses [x, y, z, rz].
+
+    La bride est toujours horizontale et ne tourne que de rz autour de Z. L'orientation du TCP
+    dans le repère utilisateur est donc entièrement imposée par rz :
+        R_user_tcp = R_base_user^T @ Rz(rz) @ R_flange_tool
+    (déduite de T_base_flange = T_base_user @ T_user_tcp @ T_flange_tool⁻¹ avec R_base_flange = Rz(rz)).
+
+    Paramètres
+    ----------
+    poses4 : array-like de shape (4,) ou (n, 4)
+        Poses [x, y, z, rz] (mm, mm, mm, degrés), x, y, z dans le repère utilisateur.
+    tool_frame, user_frame : RigidTransform ou None
+        Repères outil et utilisateur. None = identité.
+
+    Retour
+    ------
+    RigidTransform
+        Pose(s) du TCP dans le repère utilisateur, à passer à delta_inverse_with_frames().
+    """
+    p = np.asarray(poses4, dtype=float)
+    reduced = p.ndim == 1
+    p = np.atleast_2d(p)
+    if p.ndim != 2 or p.shape[1] != 4:
+        raise ValueError(f"Poses attendues de shape (4,) ou (n, 4), reçu {p.shape}")
+
+    rot = _hom(_frame_ou_identite(user_frame))[:3, :3].T @ _rot_z(p[:, 3]) @ _hom(_frame_ou_identite(tool_frame))[:3, :3]
+    hom = np.zeros((len(p), 4, 4))
+    hom[:, :3, :3] = rot
+    hom[:, :3, 3] = p[:, :3]
+    hom[:, 3, 3] = 1.0
+    return RigidTransform.from_homogeneous(hom[0] if reduced else hom)
+
+
+def delta_inverse_from_poses4(poses4, tool_frame=None, user_frame=None,
+                              tol_inclinaison_deg: float = TOL_INCLINAISON_DEG) -> np.ndarray:
+    """
+    MGI du robot 4 axes pour des poses [x, y, z, rz] exprimées dans le repère utilisateur.
+
+    Passe par tcp_pose_from_poses4() puis delta_inverse_with_frames() : toute la chaîne de repères
+    T_base_user @ T_user_tcp @ T_flange_tool⁻¹ est appliquée, même quand les repères valent l'identité.
+
+    La matrice de rotation ne connaît rz que modulo 360° : l'angle θ4 est donc recalculé à partir
+    du rz demandé, ce qui conserve les rotations de plus d'un demi-tour (ex. rz = 270°).
+
+    Retour
+    ------
+    np.ndarray de shape (n, 4)
+        Angles [t1, t2, t3, t4] en degrés ; NaN sur toute la ligne si la pose est inatteignable.
+    """
+    p = np.atleast_2d(np.asarray(poses4, dtype=float))
+    tool, user = _frame_ou_identite(tool_frame), _frame_ou_identite(user_frame)
+    angles = np.atleast_2d(delta_inverse_with_frames(tcp_pose_from_poses4(p, tool, user), tool, user,
+                                                     tol_inclinaison_deg))
+    angles[:, 3] = np.where(np.isnan(angles[:, 3]), np.nan, axe4_inverse(p[:, 3]))
+    return angles
+
+
+def delta_forward_to_poses4(angles_4, tool_frame=None, user_frame=None) -> np.ndarray:
+    """
+    MGD du robot 4 axes vers des poses [x, y, z, rz] exprimées dans le repère utilisateur.
+
+    x, y, z : position du TCP dans le repère utilisateur (via delta_forward_with_frames) ;
+    rz      : rotation de la plateforme déduite de θ4, sans repliement à ±180°.
+
+    Retour
+    ------
+    np.ndarray de shape (n, 4) ; NaN en x, y, z si les angles sont impossibles.
+    """
+    q = np.atleast_2d(np.asarray(angles_4, dtype=float))
+    tcp = delta_forward_with_frames(q, _frame_ou_identite(tool_frame), _frame_ou_identite(user_frame))
+    return np.column_stack((tcp.translation, axe4_direct(q[:, 3])))
 
 
 def calibrate_tool_frame(flange_poses: np.ndarray) -> RigidTransform:
