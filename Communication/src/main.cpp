@@ -6,11 +6,15 @@ int i = 0, j = 0;
 int matrice[5][9999] = {0};  // Déclaration de la matrice globale
 void menu();
 void ecrire_matrice();
+void driver();
 String message;
 void setup() 
 {
     Serial.begin(BAUD_RATE);   // Moniteur USB pour le débogage
     Serial1.begin(BAUD_RATE);  // UART matériel : RX1 broche 0, TX1 broche 1
+    Serial2.begin(BAUD_RATE);  // UART matériel : RX2 broche 7, TX2 broche 8
+    Serial3.begin(BAUD_RATE);  // UART matériel : RX3 broche 15, TX3 broche 14
+    Serial4.begin(BAUD_RATE);  // UART matériel : RX4 broche 16, TX4 broche 17
     Serial.println("UART du Teensy 4.1 initialise.");
     
 }
@@ -18,7 +22,64 @@ void setup()
 void loop() 
 {
     menu();
-    // if (Serial1.available() > 0) {
+    driver();
+    
+}
+
+void menu()
+{
+   if (Serial1.available() > 0) 
+    {
+        String message = Serial1.readStringUntil('\n');
+        // int message2;
+        Serial.println(message);        // message.trim(); // Retire notamment le '\r' éventuel
+        if (message == "START_MATRIX")
+        {
+        ecrire_matrice();
+        }
+    }
+ 
+}
+void driver()
+{
+    Serial2.write9bit(0x01);  // Envoie un octet de données avec le bit de parité à 1
+    Serial3.write9bit(0x01);  // Envoie un octet de
+    Serial4.write9bit(0x01);  // Envoie un octet de données avec le bit de parité à 1
+
+}
+
+void ecrire_matrice()
+{
+    //Serial.println("Veuillez entrer les valeurs de la matrice (5 valeurs séparées par des espaces) :");
+    for (int chill=0;message =='END_MATRIX';chill++)
+    {
+        String message = Serial1.readStringUntil('\n');
+        message.trim();
+        for (int i = 0; message == 'END_MATRIX'; i++) 
+        {
+            int pos = message.indexOf(' ');
+            if (pos == -1) 
+            {
+                matrice[j][i] = message.toInt();
+                break;
+            }
+            j++;
+
+            matrice[j][i] = message.substring(0, pos).toInt();
+            message = message.substring(pos + 1);
+            message.trim();
+        }      
+    }
+    Serial.println("Matrice recue :");
+    for (int ini=0; i ==0; i--) 
+    {
+      Serial.print(matrice[j][i]);
+      Serial.print(" ");
+      flag=1;
+    }
+    // Serial1.write("MATRIX_DONE\n");
+}
+// if (Serial1.available() > 0) {
     //     String message = Serial1.readStringUntil('\n');
     //     int message2;
     //     message.trim();  // Retire notamment le '\r' éventuel
@@ -53,51 +114,3 @@ void loop()
     //  Serial1.write("MATRIX_DONE\n");
     //  flag = 0;
     // }
-}
-
-void menu()
-{
-   if (Serial1.available() > 0) 
-    {
-        String message = Serial1.readStringUntil('\n');
-        // int message2;
-        Serial.println(message);        // message.trim(); // Retire notamment le '\r' éventuel
-        if (message == "START_MATRIX")
-        {
-        ecrire_matrice();
-        }
-    }
- 
-}
-
-void ecrire_matrice()
-{
-    //Serial.println("Veuillez entrer les valeurs de la matrice (5 valeurs séparées par des espaces) :");
-    for (int chill=0;message =='END_MATRIX';chill++)
-    {
-        String message = Serial1.readStringUntil('\n');
-        message.trim();
-        for (int i = 0; message == 'END_MATRIX'; i++) 
-        {
-            int pos = message.indexOf(' ');
-            if (pos == -1) 
-            {
-                matrice[j][i] = message.toInt();
-                break;
-            }
-            j++;
-
-            matrice[j][i] = message.substring(0, pos).toInt();
-            message = message.substring(pos + 1);
-            message.trim();
-        }      
-    }
-    Serial.println("Matrice recue :");
-    for (int ini=0; i ==0; i--) 
-    {
-      Serial.print(matrice[j][i]);
-      Serial.print(" ");
-      flag=1;
-    }
-    // Serial1.write("MATRIX_DONE\n");
-}
