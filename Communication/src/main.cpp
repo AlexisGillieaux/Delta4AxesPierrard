@@ -4,9 +4,15 @@ constexpr unsigned long BAUD_RATE = 115200;
 int flag = 0;
 int i = 0, j = 0;
 int matrice[5][9999] = {0};  // Déclaration de la matrice globale
+int controle_driver=999;
+int ecrire_raspberry_flag=0;
+int free_drive_flag=0;
+String message_raspberry;
 void menu();
 void ecrire_matrice();
 void driver();
+void ecrireToRaspberry();
+void free_drive();
 String message;
 void setup() 
 {
@@ -15,6 +21,7 @@ void setup()
     Serial2.begin(BAUD_RATE);  // UART matériel : RX2 broche 7, TX2 broche 8
     Serial3.begin(BAUD_RATE);  // UART matériel : RX3 broche 15, TX3 broche 14
     Serial4.begin(BAUD_RATE);  // UART matériel : RX4 broche 16, TX4 broche 17
+    Serial5.begin(BAUD_RATE);  // UART matériel : RX5 broche 21, TX5 broche 20
     Serial.println("UART du Teensy 4.1 initialise.");
     
 }
@@ -35,17 +42,25 @@ void menu()
         Serial.println(message);        // message.trim(); // Retire notamment le '\r' éventuel
         if (message == "START_MATRIX")
         {
-        ecrire_matrice();
+            ecrire_matrice();
         }
+        if (message == "FREE_DRIVE")
+        {
+            free_drive_flag=1;
+        }
+    }
+    if (ecrire_raspberry_flag == 1)
+    {
+        ecrireToRaspberry();
     }
  
 }
 void driver()
 {
-    Serial2.write9bit(0x01);  // Envoie un octet de données avec le bit de parité à 1
-    Serial3.write9bit(0x01);  // Envoie un octet de
-    Serial4.write9bit(0x01);  // Envoie un octet de données avec le bit de parité à 1
-
+    if(free_drive_flag==1)
+    {
+        free_drive();
+    }
 }
 
 void ecrire_matrice()
@@ -79,6 +94,32 @@ void ecrire_matrice()
     }
     // Serial1.write("MATRIX_DONE\n");
 }
+void ecrireToRaspberry()
+{
+    Serial1.println(message_raspberry);
+}
+void free_drive()
+{
+    Serial2.println();
+    Serial3.println();
+    Serial4.println();
+    Serial5.println();
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // if (Serial1.available() > 0) {
     //     String message = Serial1.readStringUntil('\n');
     //     int message2;
