@@ -1,6 +1,6 @@
 """
-Tests de delta_transform.py : repères utilisateur, repère outil (y compris excentré
-et incliné), mouvements linéaires du TCP, calibrations.
+Tests de delta_transform.py : repères utilisateur, repère outil excentré, mouvements
+linéaires du TCP, calibrations.
 
 Lancer : python test_delta_transform.py   (ou pytest test_delta_transform.py)
 
@@ -9,8 +9,10 @@ Convention des scénarios
 - Le TCP est l'origine (0, 0, 0) du repère outil. Les trajectoires sont décrites par
   la pose du TCP dans le repère utilisateur : c'est elle qui doit être linéaire.
 - La bride d'un robot delta reste parallèle à la base : seule sa rotation rz est libre.
-  L'orientation cible du TCP dans le repère utilisateur est donc
-      R_tcp = R_base_user^T @ Rz(rz) @ R_flange_tool
+  Les repères outil et utilisateur sont donc horizontaux eux aussi : l'outil est une simple
+  translation [x, y, z] (excentration), le repère utilisateur une translation + rz.
+  L'orientation cible du TCP dans le repère utilisateur est
+      R_tcp = R_base_user^T @ Rz(rz)
   (rz = rotation de la bride, c'est-à-dire celle du 4ème axe).
 """
 
@@ -28,17 +30,15 @@ RACINE_PROJET = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RACINE_PROJET / "Coords"))
 import trajectoires4Axes as tr      # noqa: E402  (trajectoires qui utilisent delta_transform)
 
-# Crayon pris de biais : TCP à 30 mm de l'axe de la bride, 80 mm plus bas, incliné de 45° autour de Y.
-OUTIL_CRAYON = [30, 0, -80, 0, 45, 0]
-OUTIL_CENTRE = [0, 0, -100, 0, 0, 0]
-OUTIL_FORT_DECALAGE = [-40, 25, -60, 20, -30, 70]
+# Crayon excentré : TCP à 30 mm de l'axe de la bride (en X), 80 mm plus bas.
+OUTIL_CRAYON = [30, 0, -80]
+OUTIL_CENTRE = [0, 0, -100]
+OUTIL_FORT_DECALAGE = [-40, 25, -60]
 
-# Table 400 mm sous la base, tournée de 15° autour de Z.
-USER_TABLE = [20, -30, -400, 0, 0, 15]
+# Table 400 mm sous la base, tournée de 15° autour de Z. Format [x, y, z, rz].
+USER_TABLE = [20, -30, -400, 15]
 # Zone surélevée sur la table, tournée dans l'autre sens.
-USER_ZONE = [60, 40, -390, 0, 0, -35]
-# Plan de travail incliné de 10° autour de X.
-USER_INCLINE = [0, 0, -400, 10, 0, 0]
+USER_ZONE = [60, 40, -390, -35]
 
 IDENT = RigidTransform.identity(1)
 
@@ -68,7 +68,7 @@ def _rot_z(deg):
 
 def _poses_cible(user, tool, positions, rz_deg):
     """Poses du TCP dans le repère utilisateur pour une bride horizontale tournée de rz."""
-    rot = _mat(user)[:3, :3].T @ _rot_z(rz_deg) @ _mat(tool)[:3, :3]
+    rot = _mat(user)[:3, :3].T @ _rot_z(rz_deg) @ _mat(tool)[:3, :3]     # rotation de l'outil = identité
     hom = np.zeros((len(positions), 4, 4))
     hom[:, :3, :3] = rot
     hom[:, :3, 3] = positions
@@ -148,23 +148,22 @@ def test_aller_retour_reperes():
     rng = np.random.default_rng(0)
     q = np.column_stack((rng.uniform(5, 40, (200, 3)), rng.uniform(-170, 170, 200)))
     pire = 0.0
-    for nom_outil, outil in (("identité", [0] * 6), ("centré", OUTIL_CENTRE), ("crayon", OUTIL_CRAYON),
+    for nom_outil, outil in (("identité", [0] * 3), ("centré", OUTIL_CENTRE), ("crayon", OUTIL_CRAYON),
                              ("fort décalage", OUTIL_FORT_DECALAGE)):
-        for nom_user, user in (("identité", [0] * 6), ("table", USER_TABLE), ("zone", USER_ZONE),
-                               ("incliné", USER_INCLINE)):
+        for nom_user, user in (("identité", [0] * 4), ("table", USER_TABLE), ("zone", USER_ZONE)):
             tool_f, user_f = dt.tool_frame_from_pose(outil), dt.user_frame_from_pose(user)
             retour = dt.delta_inverse_with_frames(dt.delta_forward_with_frames(q, tool_f, user_f), tool_f, user_f)
             assert not np.isnan(retour).any(), f"NaN avec outil {nom_outil} et repère {nom_user}"
             pire = max(pire, np.abs(retour - q).max())
     assert pire < 1e-6, f"aller-retour trop imprécis : {pire:.2e} °"
-    print(f"aller-retour MGD/MGI : 16 combinaisons x 200 poses, erreur max = {pire:.2e} °")
+    print(f"aller-retour MGD/MGI : 12 combinaisons x 200 poses, erreur max = {pire:.2e} °")
 
 
 def test_ligne_droite_outil_excentre():
     """Le TCP (0,0,0 du repère outil) suit une droite, pour plusieurs outils et repères utilisateur."""
     p0, p1 = [-40, -30, 20], [60, 50, 60]
     pire = 0.0
-    for nom_outil, outil in (("centré", OUTIL_CENTRE), ("crayon 45°", OUTIL_CRAYON),
+    for nom_outil, outil in (("centré", OUTIL_CENTRE), ("crayon", OUTIL_CRAYON),
                              ("fort décalage", OUTIL_FORT_DECALAGE)):
         for nom_user, user in (("table", USER_TABLE), ("zone surélevée", USER_ZONE)):
             sc = _scenario_ligne(dt.tool_frame_from_pose(outil), dt.user_frame_from_pose(user), p0, p1)
@@ -203,12 +202,18 @@ def test_pivot_autour_du_tcp():
 
 
 def test_deplacement_dans_repere_outil():
-    """Un mouvement exprimé dans le repère outil (axe X, Y ou Z de l'outil) suit bien cet axe."""
-    tool, user = dt.tool_frame_from_pose(OUTIL_CRAYON), dt.user_frame_from_pose(USER_TABLE)
-    depart = _poses_cible(user, tool, np.array([[10.0, 10.0, 40.0]]), [20.0])
-    rot_tcp, pos_depart = _mat(depart)[:3, :3], _mat(depart)[:3, 3]
+    """Un mouvement exprimé dans le repère outil (axe X, Y ou Z de l'outil) suit bien cet axe.
 
-    for nom_axe, axe in (("X", [1, 0, 0]), ("Y", [0, 1, 0]), ("Z (axe du crayon)", [0, 0, 1])):
+    Le repère outil tourne avec la bride : ses axes sont ceux du repère utilisateur tournés de
+    (rz - rz_utilisateur) autour de Z. L'axe Z de l'outil reste vertical.
+    """
+    tool, user = dt.tool_frame_from_pose(OUTIL_CRAYON), dt.user_frame_from_pose(USER_TABLE)
+    rz = 20.0
+    depart = _poses_cible(user, tool, np.array([[10.0, 10.0, 40.0]]), [rz])
+    rot_tcp, pos_depart = _mat(depart)[:3, :3], _mat(depart)[:3, 3]
+    assert np.allclose(rot_tcp, _rot_z(rz - USER_TABLE[3])[0], atol=1e-12), "axes de l'outil = axes utilisateur tournés"
+
+    for nom_axe, axe in (("X", [1, 0, 0]), ("Y", [0, 1, 0]), ("Z", [0, 0, 1])):
         deplacement_local = 15.0 * np.array(axe)
         hom = np.tile(_mat(depart), (51, 1, 1))
         s = np.linspace(0.0, 1.0, 51)
@@ -226,34 +231,36 @@ def test_deplacement_dans_repere_outil():
         assert ecart_angle < 1e-5, f"axe {nom_axe} : direction fausse de {ecart_angle:.2e} °"
         assert _ecart_a_la_droite(tcp, tcp[0], tcp[-1]).max() < TOL_MM, f"axe {nom_axe} : trajectoire non droite"
 
-        if nom_axe.startswith("Z"):
-            # Le crayon est incliné de 45° : le long de son axe, la bride avance autant à l'horizontale qu'à la verticale.
-            bride = dt.delta_forward_with_frames(angles, IDENT, user).translation
-            horizontal = np.linalg.norm((bride[-1] - bride[0])[:2])
-            vertical = abs((bride[-1] - bride[0])[2])
-            assert np.isclose(horizontal, vertical, atol=TOL_MM)
-    print("mouvement dans le repère outil : axes X, Y et Z (crayon à 45°) suivis à moins de 1e-5 °")
+        # La bride garde la même orientation : elle se déplace exactement comme le TCP
+        bride = dt.delta_forward_with_frames(angles, IDENT, user).translation
+        assert np.allclose(bride[-1] - bride[0], tcp[-1] - tcp[0], atol=TOL_MM), f"axe {nom_axe} : bride et TCP divergent"
+    print("mouvement dans le repère outil : axes X, Y et Z suivis à moins de 1e-5 °")
 
 
-def test_repere_utilisateur_incline():
-    """Plan de travail incliné de 10° : le TCP reste dans le plan ; outil collé au plan -> refusé."""
-    tool, user = dt.tool_frame_from_pose(OUTIL_CRAYON), dt.user_frame_from_pose(USER_INCLINE)
-    p0, p1 = [-50, -40, 30], [50, 40, 30]
-    sc = _scenario_ligne(tool, user, p0, p1)
-    ecart = _verifier_ligne(sc, p0, p1, "plan incliné")
-    assert np.allclose(sc["retour"].translation[:, 2], 30.0, atol=TOL_MM), "le TCP quitte le plan de travail"
+def test_reperes_inclines_refuses():
+    """Un repère incliné n'a pas de sens sur un delta : refusé partout (constructeurs, calibration, repère à la main)."""
+    pente_10 = 100 * np.tan(np.radians(10))
+    inclines = {
+        "outil à 6 valeurs (avec rotation)": lambda: dt.tool_frame_from_pose([30, 0, -80, 0, 45, 0]),
+        "repère utilisateur à 6 valeurs": lambda: dt.user_frame_from_pose([0, 0, -400, 10, 0, 0]),
+        "RigidTransform incliné en repère utilisateur":
+            lambda: dt.delta_inverse_from_poses4([[0, 0, -300, 0]], None, RigidTransform.from_pose([0, 0, -400, 10, 0, 0])),
+        "RigidTransform incliné en repère outil":
+            lambda: dt.delta_inverse_from_poses4([[0, 0, -300, 0]], RigidTransform.from_pose([0, 0, -80, 0, 45, 0])),
+        "calibration utilisateur, plan incliné de 10°":
+            lambda: dt.calibrate_user_frame(np.array([[0, 0, -400], [100, 0, -400], [0, 100, -400 + pente_10]])),
+    }
+    for nom, appel in inclines.items():
+        try:
+            appel()
+        except ValueError:
+            continue
+        raise AssertionError(f"{nom} : une ValueError était attendue")
 
-    hom_user = _mat(user)
-    tcp_base = sc["retour"].translation @ hom_user[:3, :3].T + hom_user[:3, 3]
-    assert np.ptp(tcp_base[:, 2]) > 5.0, "dans la base, la ligne doit monter (plan incliné)"
-
-    # Orientation « outil aligné sur le plan » : la bride devrait s'incliner de 10°, impossible pour un delta.
-    cible = RigidTransform.from_pose([0, 0, 30, 0, 0, 0])
-    assert np.isnan(dt.delta_inverse_with_frames(cible, IDENT, user)).all()
-    accepte = dt.delta_inverse_with_frames(cible, IDENT, user, tol_inclinaison_deg=15.0)
-    assert not np.isnan(accepte).any(), "avec une tolérance de 15°, l'inclinaison de 10° doit être ignorée"
-    print(f"plan incliné de 10° : TCP dans le plan (écart à la droite {ecart:.2e} mm), "
-          f"orientation inclinée refusée (NaN) sauf tolérance élargie")
+    # Une rotation autour de Z reste acceptée, y compris dans un RigidTransform fait à la main
+    tournee = RigidTransform.from_pose([0, 0, 0, 0, 0, 30])
+    assert not np.isnan(dt.delta_inverse_from_poses4([[0, 0, -300, 0]], None, tournee)).any()
+    print(f"repères inclinés : {len(inclines)} cas refusés par une ValueError, rotation autour de Z acceptée")
 
 
 def test_hors_espace_de_travail():
@@ -295,14 +302,16 @@ def test_formes_de_sortie():
 
 
 def test_calibration_repere_utilisateur():
-    """calibrate_user_frame retrouve un repère connu, exactement puis avec du bruit de mesure."""
+    """calibrate_user_frame retrouve un repère horizontal connu, exactement puis avec du bruit de mesure."""
     rng = np.random.default_rng(1)
-    rot = Rotation.random(random_state=1).as_matrix()
+    rz = 37.0
+    rot = _rot_z(rz)[0]
     origine = np.array([40.0, -60.0, -380.0])
     pts = np.array([origine, origine + 150 * rot[:, 0], origine + 80 * rot[:, 0] + 120 * rot[:, 1]])
 
     frame = _mat(dt.calibrate_user_frame(pts))
     assert np.allclose(frame[:3, :3], rot, atol=1e-12) and np.allclose(frame[:3, 3], origine, atol=1e-12)
+    assert np.allclose(frame, _mat(dt.user_frame_from_pose([*origine, rz])), atol=1e-12), "même repère que la saisie directe"
 
     # Les points enregistrés doivent avoir les bonnes coordonnées dans le repère calibré
     local = (~RigidTransform.from_homogeneous(frame)).transform_points(pts)
@@ -310,40 +319,46 @@ def test_calibration_repere_utilisateur():
 
     bruit = pts + rng.normal(0, 0.1, pts.shape)
     frame_bruit = _mat(dt.calibrate_user_frame(bruit))
-    erreur_deg = np.degrees(np.linalg.norm(Rotation.from_matrix(frame_bruit[:3, :3] @ rot.T).as_rotvec()))
+    erreur_deg = abs((np.degrees(np.arctan2(frame_bruit[1, 0], frame_bruit[0, 0])) - rz + 180) % 360 - 180)
     assert np.allclose(frame_bruit[:3, :3] @ frame_bruit[:3, :3].T, np.eye(3), atol=1e-12), "repère non orthonormé"
+    assert np.allclose(frame_bruit[:3, 2], [0, 0, 1]), "l'axe Z du repère doit rester vertical"
     assert erreur_deg < 0.5, f"bruit de 0.1 mm : erreur d'orientation {erreur_deg:.2f} °"
+
+    # Petite pente due à la mesure à la main (0.5 mm sur 150 mm, soit 0.2°) : acceptée, repère ramené à l'horizontale
+    pente = pts.copy()
+    pente[1, 2] += 0.5
+    assert np.allclose(_mat(dt.calibrate_user_frame(pente))[:3, 2], [0, 0, 1])
     print(f"calibration repère utilisateur : exacte ; avec bruit de 0.1 mm, erreur d'orientation = {erreur_deg:.3f} °")
 
 
 def test_calibration_outil():
-    """calibrate_tool_frame retrouve le TCP si les rotations sont variées ; refuse le cas delta (rotation Z seule)."""
+    """calibrate_tool_frame retrouve le décalage (x, y) de l'outil avec des rz variés ; refuse un rz unique."""
     rng = np.random.default_rng(2)
-    p_tool = np.array([15.0, -25.0, 120.0])
-    point_fixe = np.array([300.0, 100.0, 50.0])
+    p_xy = np.array([15.0, -25.0])
+    z_outil = -80.0
+    point_fixe = np.array([300.0, 100.0])
 
-    def poses_bride(angles, bruit=0.0):
+    def poses_bride(rz_liste, bruit=0.0):
         poses = []
-        for a in angles:
-            rot = Rotation.from_euler("xyz", a, degrees=True).as_matrix()
-            poses.append([*(point_fixe - rot @ p_tool + rng.normal(0, bruit, 3)), *a])
+        for rz in rz_liste:
+            xy = point_fixe - _rot_z(rz)[0, :2, :2] @ p_xy + rng.normal(0, bruit, 2)
+            poses.append([*xy, 50.0, rz])
         return np.array(poses)
 
-    exact = dt.calibrate_tool_frame(poses_bride(rng.uniform(-60, 60, (8, 3))))
-    assert np.allclose(exact.as_pose()[:3], p_tool, atol=1e-6) and np.allclose(exact.as_pose()[3:], 0.0)
+    exact = dt.calibrate_tool_frame(poses_bride([0, 40, 100, 170, 250, 320]), z_outil)
+    assert np.allclose(exact.as_pose()[:3], [*p_xy, z_outil], atol=1e-9) and np.allclose(exact.as_pose()[3:], 0.0)
 
-    bruite = dt.calibrate_tool_frame(poses_bride(rng.uniform(-60, 60, (12, 3)), bruit=0.05))
-    erreur = np.linalg.norm(bruite.as_pose()[:3] - p_tool)
+    bruite = dt.calibrate_tool_frame(poses_bride(rng.uniform(0, 360, 12), bruit=0.05), z_outil)
+    erreur = np.linalg.norm(bruite.as_pose()[:2] - p_xy)
     assert erreur < 0.5, f"bruit de 0.05 mm : TCP faux de {erreur:.2f} mm"
 
-    rotation_z = np.column_stack((np.zeros((5, 2)), [0, 30, 60, 90, 120]))
-    try:
-        dt.calibrate_tool_frame(poses_bride(rotation_z))
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("rotation autour de Z seule : une ValueError était attendue (z inobservable)")
-    print(f"calibration outil : exacte ; avec bruit de 0.05 mm, erreur = {erreur:.3f} mm ; rotation Z seule refusée")
+    for nom, rz_liste in (("un seul rz", [30, 30, 30, 30]), ("rz identiques modulo 360°", [0, 360, 720])):
+        try:
+            dt.calibrate_tool_frame(poses_bride(rz_liste), z_outil)
+        except ValueError:
+            continue
+        raise AssertionError(f"{nom} : une ValueError était attendue (décalage (x, y) inobservable)")
+    print(f"calibration outil : exacte ; avec bruit de 0.05 mm, erreur = {erreur:.3f} mm ; rz unique refusé")
 
 
 def test_poses4_et_repere_identite():
@@ -445,13 +460,15 @@ def test_trajectoire_inatteignable_avec_reperes():
 def test_formes_et_entrees_invalides():
     """Les entrées incorrectes lèvent une ValueError au lieu de donner un résultat faux."""
     cas = {
-        "outil de shape (3,)": lambda: dt.tool_frame_from_pose([1, 2, 3]),
+        "outil de shape (2,)": lambda: dt.tool_frame_from_pose([1, 2]),
         "repère utilisateur de shape (7,)": lambda: dt.user_frame_from_pose(np.zeros(7)),
         "3 points alignés": lambda: dt.calibrate_user_frame(np.array([[0, 0, 0], [1, 0, 0], [2, 0, 0]], float)),
         "points 0 et 1 confondus": lambda: dt.calibrate_user_frame(np.array([[0, 0, 0], [0, 0, 0], [1, 1, 0]], float)),
         "calibration utilisateur (2, 3)": lambda: dt.calibrate_user_frame(np.zeros((2, 3))),
-        "calibration outil avec 3 poses": lambda: dt.calibrate_tool_frame(np.zeros((3, 6))),
-        "calibration outil de shape (n, 3)": lambda: dt.calibrate_tool_frame(np.zeros((6, 3))),
+        "calibration outil avec 2 poses": lambda: dt.calibrate_tool_frame(np.zeros((2, 4)), -80.0),
+        "calibration outil de shape (n, 3)": lambda: dt.calibrate_tool_frame(np.zeros((6, 3)), -80.0),
+        "calibration outil avec 6 colonnes": lambda: dt.calibrate_tool_frame(np.zeros((6, 6)), -80.0),
+        "point 2 du mauvais côté": lambda: dt.calibrate_user_frame(np.array([[0, 0, 0], [1, 0, 0], [0, -1, 0]], float)),
         "MGD avec 3 angles": lambda: dt.delta_forward_with_frames([1, 2, 3], IDENT, IDENT),
     }
     for nom, appel in cas.items():
@@ -474,8 +491,8 @@ def test_entrees_limites_trajectoires():
         "pose NaN": lambda: tr.cartesian_trapezoidal_trajectory([np.nan, 0, -300, 0], B, 100, 400),
         "pose infinie": lambda: tr.jointmotangles_trapezoidal([np.inf, 0, -300, 0], B, 60, 120),
         "pose de 5 valeurs": lambda: tr.lineartrajectory([0, 0, -300, 0, 0], B, 1.0),
-        "outil NaN": lambda: dt.tool_frame_from_pose([np.nan, 0, 0, 0, 0, 0]),
-        "repère utilisateur infini": lambda: dt.user_frame_from_pose([np.inf, 0, 0, 0, 0, 0]),
+        "outil NaN": lambda: dt.tool_frame_from_pose([np.nan, 0, 0]),
+        "repère utilisateur infini": lambda: dt.user_frame_from_pose([np.inf, 0, 0, 0]),
         "v_max infinie": lambda: tr.cartesian_trapezoidal_trajectory(A, B, np.inf, 400),
         "dt nul": lambda: tr.cartesian_trapezoidal_trajectory(A, B, 100, 400, dt=0),
         "dt minuscule (trop de points)": lambda: tr.cartesian_trapezoidal_trajectory(A, B, 1, 400, dt=1e-7),
@@ -494,7 +511,7 @@ def test_entrees_limites_trajectoires():
     erreurs_type = {
         "outil donné en chaîne": lambda: tr.cartesian_trapezoidal_trajectory(A, B, 100, 400, tool_frame="x"),
         "outil donné en matrice numpy": lambda: tr.jointmotangles(A, B, 2, tool_frame=np.eye(4)),
-        "repère utilisateur en liste": lambda: dt.delta_inverse_from_poses4([A], user_frame=[0] * 6),
+        "repère utilisateur en liste": lambda: dt.delta_inverse_from_poses4([A], user_frame=[0] * 4),
     }
     for nom, appel in erreurs_type.items():
         try:
@@ -534,7 +551,7 @@ def figure_lignes():
     pivot = _scenario_ligne(tool, user, point, point, rz0=0, rz1=180, n=91)
 
     fig, axes = plt.subplots(2, 2, figsize=(13, 10))
-    fig.suptitle("Repère outil excentré (crayon à 45°) : le TCP suit la trajectoire demandée", fontweight="bold")
+    fig.suptitle("Repère outil excentré (crayon à 30 mm de l'axe) : le TCP suit la trajectoire demandée", fontweight="bold")
 
     ax = axes[0, 0]
     bride, tcp = _vecteurs_outil(ligne)
@@ -576,40 +593,6 @@ def figure_lignes():
     return fig
 
 
-def figure_repere_incline():
-    """Vue 3D : plan de travail incliné de 10°, ligne du TCP dans ce plan, crayon et bride."""
-    couleurs = tr.COULEURS_MOTEURS
-    tool, user = dt.tool_frame_from_pose(OUTIL_CRAYON), dt.user_frame_from_pose(USER_INCLINE)
-    p0, p1 = [-50, -40, 30], [50, 40, 30]
-    sc = _scenario_ligne(tool, user, p0, p1, n=51)
-
-    hom = _mat(user)
-    vers_base = lambda p: np.asarray(p) @ hom[:3, :3].T + hom[:3, 3]
-    tcp, bride = vers_base(sc["retour"].translation), vers_base(sc["bride"])
-
-    fig = plt.figure(figsize=(9, 7))
-    ax = fig.add_subplot(projection="3d")
-    plan = vers_base([[-80, -70, 0], [80, -70, 0], [80, 70, 0], [-80, 70, 0], [-80, -70, 0]])
-    ax.plot(*plan.T, color=tr.AXES, lw=1.5)
-    ax.plot_trisurf(plan[:4, 0], plan[:4, 1], plan[:4, 2], color=tr.GRILLE, alpha=0.5)
-    origine = vers_base([0, 0, 0])
-    for axe, couleur, nom in (([40, 0, 0], "#d6342a", "X"), ([0, 40, 0], "#1baf7a", "Y"), ([0, 0, 40], "#2a78d6", "Z")):
-        fin = vers_base(axe)
-        ax.plot(*zip(origine, fin), color=couleur, lw=2)
-        ax.text(*fin, f"{nom} utilisateur", color=couleur, fontsize=8)
-    ax.plot(*tcp.T, color=couleurs[0], lw=3, label="TCP (droite dans le plan)")
-    ax.plot(*bride.T, color=couleurs[1], lw=1.5, label="bride")
-    for b, t in zip(bride[::10], tcp[::10]):
-        ax.plot(*zip(b, t), color="#52514e", lw=1.2)
-    ax.set_title("Plan de travail incliné de 10° : ligne du TCP avec un crayon à 45°", fontsize=11)
-    ax.set_xlabel("x base (mm)"); ax.set_ylabel("y base (mm)"); ax.set_zlabel("z base (mm)")
-    tout = np.vstack((plan, tcp, bride))
-    ax.set_box_aspect(np.ptp(tout, axis=0))
-    ax.legend(fontsize=8)
-    fig.tight_layout()
-    return fig
-
-
 # ============================================================================
 #                      LANCEMENT
 # ============================================================================
@@ -621,7 +604,7 @@ TESTS = [
     test_ligne_avec_rotation,
     test_pivot_autour_du_tcp,
     test_deplacement_dans_repere_outil,
-    test_repere_utilisateur_incline,
+    test_reperes_inclines_refuses,
     test_hors_espace_de_travail,
     test_formes_de_sortie,
     test_poses4_et_repere_identite,
@@ -654,13 +637,11 @@ def test(dossier_sortie=None, afficher=True):
             echecs.append(fonction.__name__)
             print(f"ÉCHEC : {type(erreur).__name__}: {erreur}")
 
-    for nom_fichier, construire in (("test_delta_transform_lignes.png", figure_lignes),
-                                    ("test_delta_transform_repere_incline.png", figure_repere_incline)):
-        fig = construire()
-        fig.savefig(dossier / nom_fichier, dpi=150, bbox_inches="tight")
-        print(f"Graphique sauvegardé : {dossier / nom_fichier}")
-        if not afficher:
-            plt.close(fig)
+    fig = figure_lignes()
+    fig.savefig(dossier / "test_delta_transform_lignes.png", dpi=150, bbox_inches="tight")
+    print(f"Graphique sauvegardé : {dossier / 'test_delta_transform_lignes.png'}")
+    if not afficher:
+        plt.close(fig)
 
     print("\n" + "=" * 70)
     if echecs:

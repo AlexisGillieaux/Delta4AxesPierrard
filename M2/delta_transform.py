@@ -41,9 +41,15 @@ OFFSET_AXE4 = 0.0
 # Inclinaison maximale tolérée (degrés) entre la bride demandée et l'horizontale.
 # La plateforme d'un robot delta reste toujours parallèle à la base : seule la rotation
 # rz autour de Z est réalisable. Une pose dont la bride est plus inclinée que cette valeur
-# est jugée inatteignable (NaN) ; en dessous, l'inclinaison résiduelle est ignorée
-# (ex. repère utilisateur calibré à la main, jamais parfaitement horizontal).
+# est jugée inatteignable (NaN) ; en dessous, l'inclinaison résiduelle est ignorée.
+# Sert aussi à accepter un plan de travail mesuré à la main (calibrate_user_frame), jamais
+# parfaitement horizontal.
 TOL_INCLINAISON_DEG = 1.0
+
+# Les repères outil et utilisateur sont toujours horizontaux (seule une rotation autour de Z
+# est possible) : les axes Z de tous les repères sont parallèles à celui de la base. Un
+# RigidTransform fourni à la main dont l'axe Z s'écarte de plus de TOL_REPERE_DEG est refusé.
+TOL_REPERE_DEG = 1e-6
 
 # Calibration outil : rapport minimal entre la plus petite et la plus grande valeur
 # singulière du système. En dessous, la rotation de la bride n'est pas assez variée
@@ -99,13 +105,25 @@ def DeltaForward4(angles):
 
 
 def _frame_ou_identite(frame) -> RigidTransform:
-    """Le repère donné, ou la transformation identité si frame vaut None (repère inchangé)."""
+    """Le repère donné, ou la transformation identité si frame vaut None (repère inchangé).
+
+    Lève une ValueError si le repère est incliné : sur un delta à 4 axes la plateforme reste
+    parallèle à la base, donc les repères outil et utilisateur ne peuvent que se translater
+    et tourner autour de Z.
+    """
     if frame is None:
         return RigidTransform.identity(1)
     if not isinstance(frame, RigidTransform):
         raise TypeError(
             f"Repère attendu : RigidTransform (tool_frame_from_pose, user_frame_from_pose, "
             f"calibrate_*) ou None, reçu {type(frame).__name__}"
+        )
+    rot = np.asarray(frame.as_hom_mat())[..., :3, :3]
+    inclinaison = np.degrees(np.arctan2(np.hypot(rot[..., 0, 2], rot[..., 1, 2]), rot[..., 2, 2]))
+    if np.any(inclinaison > TOL_REPERE_DEG):
+        raise ValueError(
+            f"Repère incliné de {np.max(inclinaison):.3g}° : un robot delta 4 axes garde sa plateforme "
+            f"parallèle à la base, seule une rotation autour de Z est possible pour un repère"
         )
     return frame
 
@@ -137,22 +155,29 @@ def tool_frame_from_pose(pose) -> RigidTransform:
     Utilisé quand la géométrie de l'outil est connue (dessin, datasheet).
     Pour une calibration expérimentale, utiliser calibrate_tool_frame().
 
+    Le repère outil est une simple translation : la plateforme d'un delta reste parallèle à la
+    base, l'outil ne peut donc être qu'excentré (x, y) et plus ou moins long (z). Une inclinaison
+    de l'outil (ex. un crayon à 45°) ne changerait ni la position du TCP ni les angles moteurs
+    et le robot ne pourrait pas l'orienter : elle n'est pas modélisée. Une rotation de l'outil
+    autour de Z n'a pas non plus d'effet sur la position du TCP : elle n'est pas modélisée.
+
     Paramètres
     ----------
-    pose : array-like de shape (6,) [x, y, z, rx, ry, rz]
-        Pose du TCP exprimée dans le repère bride (en mm et degrés, convention xyz).
+    pose : array-like de shape (3,) [x, y, z]
+        Position du TCP exprimée dans le repère bride (en mm). Par exemple z = -80 pour un
+        TCP 80 mm sous la bride.
 
     Retour
     ------
     RigidTransform
-        Transformation T_flange_tool.
+        Transformation T_flange_tool (translation pure).
     """
     pose = np.asarray(pose, dtype=float)
-    if pose.shape != (6,):
-        raise ValueError(f"Pose attendue de shape (6,), reçu {pose.shape}")
+    if pose.shape != (3,):
+        raise ValueError(f"Position de l'outil attendue de shape (3,) [x, y, z], reçu {pose.shape}")
     if not np.isfinite(pose).all():
         raise ValueError(f"Pose avec NaN ou infini : {pose}")
-    return RigidTransform.from_pose(pose, seq='xyz', degrees=True)
+    return RigidTransform.from_pose(np.concatenate((pose, np.zeros(3))), seq='xyz', degrees=True)
 
 
 def user_frame_from_pose(pose) -> RigidTransform:
@@ -162,10 +187,14 @@ def user_frame_from_pose(pose) -> RigidTransform:
     Utilisé quand la position du repère de travail est connue (ex. mesurée au pied à coulisse).
     Pour une calibration expérimentale, utiliser calibrate_user_frame().
 
+    Le plan du repère utilisateur est parallèle à celui de la base : il ne peut être que
+    déplacé (x, y, z) et tourné autour de Z (rz). Un plan incliné n'a pas de sens pour un
+    robot dont la plateforme reste horizontale.
+
     Paramètres
     ----------
-    pose : array-like de shape (6,) [x, y, z, rx, ry, rz]
-        Pose du repère utilisateur exprimée dans le repère base (en mm et degrés, convention xyz).
+    pose : array-like de shape (4,) [x, y, z, rz]
+        Pose du repère utilisateur exprimée dans le repère base (en mm et degrés).
 
     Retour
     ------
@@ -173,11 +202,12 @@ def user_frame_from_pose(pose) -> RigidTransform:
         Transformation T_base_user.
     """
     pose = np.asarray(pose, dtype=float)
-    if pose.shape != (6,):
-        raise ValueError(f"Pose attendue de shape (6,), reçu {pose.shape}")
+    if pose.shape != (4,):
+        raise ValueError(f"Pose attendue de shape (4,) [x, y, z, rz], reçu {pose.shape}")
     if not np.isfinite(pose).all():
         raise ValueError(f"Pose avec NaN ou infini : {pose}")
-    return RigidTransform.from_pose(pose, seq='xyz', degrees=True)
+    return RigidTransform.from_pose(np.array([pose[0], pose[1], pose[2], 0.0, 0.0, pose[3]]),
+                                    seq='xyz', degrees=True)
 
 
 def delta_forward_with_frames(angles_4, tool_frame: RigidTransform, user_frame: RigidTransform) -> RigidTransform:
@@ -378,59 +408,59 @@ def delta_forward_to_poses4(angles_4, tool_frame=None, user_frame=None) -> np.nd
     return np.column_stack((tcp.translation, axe4_direct(q[:, 3])))
 
 
-def calibrate_tool_frame(flange_poses: np.ndarray) -> RigidTransform:
+def calibrate_tool_frame(flange_poses: np.ndarray, z_outil: float) -> RigidTransform:
     """
-    Calibre le repère outil à partir de plusieurs poses de la bride pointant vers le même TCP.
+    Calibre le repère outil (x, y) à partir de poses de la bride pointant vers le même TCP.
 
     Méthode (point fixe / multi-orientation) :
-        On amène le TCP en contact avec un point fixe de l'espace n fois,
-        avec des orientations de bride différentes à chaque prise.
-        Le TCP inconnu p_tool (exprimé dans le repère bride) vérifie :
-            T_base_flange_i @ p_tool = constante pour tout i
-        On résout le système linéaire aux moindres carrés :
+        On amène le TCP en contact avec un point fixe de l'espace n fois, avec une rotation rz
+        de la bride différente à chaque prise (la bride ne peut pas faire autre chose).
+        Le TCP inconnu p_tool = (px, py) (dans le repère bride) vérifie :
+            t_i + Rz(rz_i) @ p_tool = constante pour tout i
+        On résout aux moindres carrés :
             (R_i - R_j) @ p_tool = t_j - t_i  pour toutes les paires (i, j)
-        La translation de T_flange_tool est p_tool ; la rotation est identité
-        (le TCP ne porte pas d'orientation propre dans cette méthode).
 
-    Limite sur un robot delta : la bride ne peut tourner qu'autour de Z. Les R_i sont
-    alors toutes des rotations autour de Z et la composante z de p_tool n'est pas
-    observable (seuls x et y le sont). Dans ce cas la fonction lève ValueError ;
-    la longueur de l'outil doit être donnée avec tool_frame_from_pose().
+    Limite : la bride ne tourne qu'autour de Z, donc seule la position (x, y) du TCP est
+    observable. La longueur de l'outil (z) se mesure à part (règle, plan du constructeur) et
+    se donne dans z_outil. Si toutes les poses ont le même rz (modulo 360°), (x, y) est
+    inobservable et la fonction lève ValueError.
 
     Paramètres
     ----------
-    flange_poses : np.ndarray de shape (n, 6) avec n >= 4
-        Poses de la bride [x, y, z, rx, ry, rz] dans le repère base,
-        toutes enregistrées avec le TCP posé sur le même point fixe.
+    flange_poses : np.ndarray de shape (n, 4) avec n >= 3
+        Poses de la bride [x, y, z, rz] dans le repère base (mm, degrés), toutes enregistrées
+        avec le TCP posé sur le même point fixe. Seuls x, y et rz servent au calcul.
+    z_outil : float
+        Position z du TCP dans le repère bride (mm), ex. -80 pour un TCP 80 mm sous la bride.
 
     Retour
     ------
     RigidTransform
-        Transformation T_flange_tool calibrée.
+        Transformation T_flange_tool calibrée (translation pure).
     """
     flange_poses = np.asarray(flange_poses, dtype=float)
-    if flange_poses.ndim != 2 or flange_poses.shape[1] != 6 or flange_poses.shape[0] < 4:
-        raise ValueError(f"flange_poses doit avoir la shape (n, 6) avec n >= 4, reçu {flange_poses.shape}")
+    if flange_poses.ndim != 2 or flange_poses.shape[1] != 4 or flange_poses.shape[0] < 3:
+        raise ValueError(f"flange_poses doit avoir la shape (n, 4) avec n >= 3, reçu {flange_poses.shape}")
+    if not np.isfinite(flange_poses).all() or not np.isfinite(z_outil):
+        raise ValueError("flange_poses et z_outil doivent être finis (ni NaN ni infini)")
 
-    hom = RigidTransform.from_pose(flange_poses, seq='xyz', degrees=True).as_hom_mat()
-    rot = hom[:, :3, :3]
-    trans = hom[:, :3, 3]
+    rot = _rot_z(flange_poses[:, 3])[:, :2, :2]
+    trans = flange_poses[:, :2]
 
-    # Une équation (3 lignes) par paire i < j : (R_i - R_j) p = t_j - t_i
-    i, j = np.triu_indices(len(hom), k=1)
-    a = (rot[i] - rot[j]).reshape(-1, 3)
+    # Une équation (2 lignes) par paire i < j : (R_i - R_j) p = t_j - t_i
+    i, j = np.triu_indices(len(trans), k=1)
+    a = (rot[i] - rot[j]).reshape(-1, 2)
     b = (trans[j] - trans[i]).reshape(-1)
 
     valeurs_singulieres = np.linalg.svd(a, compute_uv=False)
-    if valeurs_singulieres[-1] < CONDITIONNEMENT_MIN * valeurs_singulieres[0]:
+    if valeurs_singulieres[0] < 1e-9 or valeurs_singulieres[-1] < CONDITIONNEMENT_MIN * valeurs_singulieres[0]:
         raise ValueError(
-            "Orientations de la bride insuffisamment variées : le TCP n'est pas observable "
-            "sur tous ses axes (un robot delta ne tourne qu'autour de Z, donc le décalage en z "
-            "de l'outil est inobservable). Utiliser tool_frame_from_pose() pour la longueur de l'outil."
+            "Rotations rz de la bride insuffisamment variées : le décalage (x, y) de l'outil "
+            "n'est pas observable. Utiliser des rz bien différents (ex. 0°, 90°, 180°)."
         )
 
-    p_tool, *_ = np.linalg.lstsq(a, b, rcond=None)
-    return RigidTransform.from_pose(np.concatenate((p_tool, np.zeros(3))), seq='xyz', degrees=True)
+    p_xy, *_ = np.linalg.lstsq(a, b, rcond=None)
+    return tool_frame_from_pose([p_xy[0], p_xy[1], z_outil])
 
 
 def calibrate_user_frame(base_points: np.ndarray) -> RigidTransform:
@@ -441,12 +471,13 @@ def calibrate_user_frame(base_points: np.ndarray) -> RigidTransform:
     et enregistrer la position du TCP dans le repère base à chaque fois :
         base_points[0] : origine du repère utilisateur
         base_points[1] : un point sur l'axe X (à distance quelconque)
-        base_points[2] : un point dans le plan XY (hors de l'axe X)
+        base_points[2] : un point dans le plan XY, du côté des Y positifs (hors de l'axe X)
 
-    La transformation T_base_user est reconstruite par orthonormalisation :
-        X = (base_points[1] - base_points[0]) normalisé
-        Z = X × (base_points[2] - base_points[0]) normalisé
-        Y = Z × X
+    Le plan du repère est parallèle à celui de la base (voir user_frame_from_pose) : seuls
+    l'origine et l'angle rz de l'axe X sont calibrés. Les trois points doivent donc être à la
+    même hauteur, à TOL_INCLINAISON_DEG près (plan de travail mesuré à la main). L'axe Z du
+    repère est celui de la base, l'axe X est la direction horizontale du point 0 vers le point 1,
+    et la hauteur de l'origine est la hauteur moyenne des 3 points (ce qui atténue le bruit).
 
     Paramètres
     ----------
@@ -461,24 +492,29 @@ def calibrate_user_frame(base_points: np.ndarray) -> RigidTransform:
     base_points = np.asarray(base_points, dtype=float)
     if base_points.shape != (3, 3):
         raise ValueError(f"base_points doit avoir la shape (3, 3), reçu {base_points.shape}")
+    if not np.isfinite(base_points).all():
+        raise ValueError("base_points contient des NaN ou des infinis")
 
     origine = base_points[0]
     vec_x = base_points[1] - origine
     vec_plan = base_points[2] - origine
 
-    norme_x = np.linalg.norm(vec_x)
-    if norme_x == 0:
+    if np.linalg.norm(vec_x) == 0:
         raise ValueError("Les points 0 et 1 sont confondus : l'axe X est indéfini")
-    x_axe = vec_x / norme_x
 
-    normale = np.cross(x_axe, vec_plan)
-    norme_z = np.linalg.norm(normale)
-    if norme_z < 1e-9 * max(np.linalg.norm(vec_plan), 1.0):
+    normale = np.cross(vec_x, vec_plan)
+    norme_n = np.linalg.norm(normale)
+    if norme_n < 1e-9 * max(np.linalg.norm(vec_x) * np.linalg.norm(vec_plan), 1.0):
         raise ValueError("Les 3 points sont alignés : le plan XY est indéfini")
-    z_axe = normale / norme_z
-    y_axe = np.cross(z_axe, x_axe)
 
-    hom = np.eye(4)
-    hom[:3, :3] = np.column_stack((x_axe, y_axe, z_axe))
-    hom[:3, 3] = origine
-    return RigidTransform.from_homogeneous(hom)
+    inclinaison = np.degrees(np.arccos(np.clip(abs(normale[2]) / norme_n, -1.0, 1.0)))
+    if inclinaison > TOL_INCLINAISON_DEG:
+        raise ValueError(
+            f"Les 3 points définissent un plan incliné de {inclinaison:.2f}° (maximum {TOL_INCLINAISON_DEG}°) : "
+            f"le plan du repère utilisateur doit être horizontal, comme celui de la base"
+        )
+    if normale[2] < 0:
+        raise ValueError("Le point 2 doit être du côté des Y positifs de l'axe X (sens trigonométrique, vu de dessus)")
+
+    rz = np.degrees(np.arctan2(vec_x[1], vec_x[0]))
+    return user_frame_from_pose([origine[0], origine[1], base_points[:, 2].mean(), rz])

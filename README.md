@@ -73,12 +73,17 @@ T = RigidTransform.from_pose([100, 0, -300, 0, 0, 90])
 ```python
 from delta_transform import tool_frame_from_pose, user_frame_from_pose
 
-# Repère outil à partir d'une géométrie connue
-T_tool = tool_frame_from_pose([x, y, z, rx, ry, rz])
+# Repère outil : position du TCP dans le repère de la bride (excentration de l'outil)
+T_tool = tool_frame_from_pose([x, y, z])
 
-# Repère utilisateur à partir d'une position mesurée
-T_user = user_frame_from_pose([x, y, z, rx, ry, rz])
+# Repère utilisateur (table de travail...) : translation + rotation autour de Z
+T_user = user_frame_from_pose([x, y, z, rz])
 ```
+
+La plateforme d'un robot delta 4 axes reste parallèle à la base : les repères outil et
+utilisateur ne peuvent donc être ni inclinés ni tournés autour de X ou Y (un repère incliné
+est refusé par une `ValueError`). Ils s'utilisent via les arguments optionnels `tool_frame`
+et `user_frame` des fonctions de `Coords/trajectoires4Axes.py`.
 
 ### 01_Fonctions_Fast.py — Gestion des points
 

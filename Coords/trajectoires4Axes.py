@@ -14,6 +14,9 @@ tool_frame_from_pose / user_frame_from_pose / calibrate_*) sont optionnels : san
 ce sont des matrices identité, et la pose est celle de la bride dans la base.
 rz reste la rotation de la plateforme autour de Z de la base (angle du 4ème axe) :
 la bride d'un delta est toujours horizontale, rz est donc la seule orientation libre.
+Pour la même raison, les repères ne peuvent pas être inclinés :
+  - repère outil     : translation [x, y, z] du TCP dans le repère de la bride (excentration) ;
+  - repère utilisateur : translation et rotation rz autour de Z, [x, y, z, rz].
 
 Conventions
 -----------
@@ -693,10 +696,10 @@ def test(dossier_sortie=None, afficher=True):
         print(f"Graphique sauvegardé : {chemin}")
 
     print("\n" + "=" * 70)
-    print("TEST 4 : Ligne droite du TCP avec outil excentré (crayon à 45°) et repère utilisateur")
+    print("TEST 4 : Ligne droite du TCP avec outil excentré (crayon) et repère utilisateur")
     print("=" * 70)
-    crayon = tf.tool_frame_from_pose([30, 0, -80, 0, 45, 0])       # TCP décalé de 30 mm, incliné de 45°
-    table = tf.user_frame_from_pose([20, -30, -400, 0, 0, 15])     # table 400 mm sous la base, tournée de 15°
+    crayon = tf.tool_frame_from_pose([30, 0, -80])                 # TCP à 30 mm de l'axe, 80 mm sous la bride
+    table = tf.user_frame_from_pose([20, -30, -400, 15])           # table 400 mm sous la base, tournée de 15°
     traj_tcp, duree_tcp = cartesian_trapezoidal_trajectory(
         [-40, -30, 20, 0], [60, 50, 60, 90],
         v_max_mm_s=100.0, a_max_mm_s2=300.0, dt=0.01,
@@ -705,7 +708,7 @@ def test(dossier_sortie=None, afficher=True):
     )
     resume_trajectoire(traj_tcp, duree_tcp)
     fig = timediagram(traj_tcp, duree_tcp,
-                      "Ligne droite du TCP – crayon à 45° sur une table décalée")
+                      "Ligne droite du TCP – crayon excentré sur une table décalée")
     if fig:
         chemin = dossier / "trajectoire4axes_reperes.png"
         fig.savefig(chemin, dpi=150, bbox_inches="tight")
