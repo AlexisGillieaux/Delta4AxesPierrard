@@ -27,9 +27,9 @@ import trajectoires4Axes as traj  # noqa: E402
 
 FICHIER_CSV = DOSSIER / "trajectoire_moteurs.csv"
 
-# Pas de temps du CSV. Le programme C n'envoie de toute façon pas plus d'un point
-# toutes les PERIODE_MS (200 ms par défaut, à 9600 bauds) : inutile d'exporter plus fin.
-DT_EXPORT_S = 0.2
+# Pas de temps du CSV : 20 ms. Le programme C rééchantillonne de toute façon au pas
+# que permet la liaison Modbus (20 ms à 115200 bauds, environ 100 ms à 9600 bauds).
+DT_EXPORT_S = 0.02
 
 
 def exporter_csv(angles, duree_s, chemin=FICHIER_CSV, dt=DT_EXPORT_S):
