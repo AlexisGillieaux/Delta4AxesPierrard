@@ -1,6 +1,8 @@
 from nicegui import ui
 from threading import Lock
 import math
+import csv
+from pathlib import Path
 
 
 # ============================================================
@@ -144,6 +146,18 @@ def reset_robot():
 # ============================================================
 #                    PAGE PRINCIPALE
 # ============================================================
+FICHIER_POINTS = Path(__file__).resolve().parent / "pointSaves.csv"
+
+def sauvegarder_point(x, y, z, rz):
+    fichier_existe = FICHIER_POINTS.exists()
+
+    with open(FICHIER_POINTS, "a", newline="", encoding="utf-8") as fichier:
+        writer = csv.writer(fichier)
+
+        if not fichier_existe or FICHIER_POINTS.stat().st_size == 0:
+            writer.writerow(["X", "Y", "Z", "Rz"])
+
+        writer.writerow([x, y, z, rz])
 
 @ui.page("/")
 def robot_page():
@@ -179,7 +193,6 @@ def robot_page():
 
     # Pas de rotation
     RZ_STEP = 0.1
-
 
     # ========================================================
     #                    MISE À JOUR 3D
@@ -889,3 +902,61 @@ ui.run(
     reload=False,
     port=8080
 )
+
+ui.separator()
+
+ui.label("Sauvegarder un point").classes(
+    "text-lg font-bold"
+)
+
+# Champs de saisie
+point_x = ui.number("X", value=0.0).classes("w-full")
+point_y = ui.number("Y", value=0.0).classes("w-full")
+point_z = ui.number("Z", value=1.0).classes("w-full")
+point_rz = ui.number("Rz (degrés)", value=0.0).classes("w-full")
+
+
+def enregistrer_point():
+    try:
+        x = float(point_x.value)
+        y = float(point_y.value)
+        z = float(point_z.value)
+        rz_deg = float(point_rz.value)
+
+        # Vérification des limites existantes
+        valeurs = {
+            "x": x,
+            "y": y,
+            "z": z,
+            "rz": math.radians(rz_deg),
+        }
+
+        for axe, valeur in valeurs.items():
+            minimum, maximum = LIMITS[axe]
+
+            if not math.isfinite(valeur) or not minimum <= valeur <= maximum:
+                ui.notify(
+                    f"Coordonnée {axe} hors limites",
+                    type="negative"
+                )
+                return
+
+        sauvegarder_point(x, y, z, rz_deg)
+
+        ui.notify(
+            "Point enregistré dans pointSaves.csv",
+            type="positive"
+        )
+
+    except (ValueError, TypeError, OSError) as e:
+        ui.notify(
+            f"Erreur : {e}",
+            type="negative"
+        )
+
+
+ui.button(
+    "Enregistrer le point",
+    on_click=enregistrer_point,
+    icon="save"
+).classes("w-full")
