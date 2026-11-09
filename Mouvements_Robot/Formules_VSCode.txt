@@ -1,0 +1,56 @@
+
+
+Appelle un code à exécuter :
+.\Code_C_V4.exe     
+
+Créer un fichier .exe : 
+gcc Code_C_V4.c -o Code_C_V4.exe
+
+
+
+Methode pour compiler:
+
+Étape 1 : Nettoyer la situation (si vous êtes sur WSL et que vous voulez abandonner)
+Si vous étiez parti sur WSL et que c'est le bazar, vous pouvez tout simplement fermer le terminal WSL ou l'ignorer. Nous allons compiler directement sous Windows natif, ce qui évite les problèmes de comptes Linux ou de commandes apt introuvables.
+
+Étape 2 : Installer un compilateur C pour Windows (en 2 minutes)
+Le moyen le plus simple d'avoir gcc sous Windows sans configuration compliquée :
+
+Téléchargez le dernier package de compilation pour Windows sur le site officiel de WinLibs : Télécharger WinLibs UCRT (version GCC) -> choisissez par exemple l'archive .zip standard pour 64-bit (ex: winlibs-x86_64-posix-...).
+
+Une fois téléchargé, décompressez le dossier (par exemple, mettez le dossier mingw64 directement à la racine de votre disque C:\, ce qui donne C:\mingw64).
+
+Étape 3 : Indiquer à Windows où se trouve le compilateur (Variables d'environnement)
+Pour que votre terminal reconnaisse la commande gcc :
+
+Dans la barre de recherche Windows, tapez "variables d'environnement" et ouvrez "Modifier les variables d'environnement système".
+
+Cliquez sur le bouton "Variables d'environnement..." en bas à droite.
+
+Dans la partie du bas ("Variables système"), cherchez la ligne nommée Path et double-cliquez dessus.
+
+Cliquez sur "Nouveau" et ajoutez le chemin vers le dossier bin de votre installation (par exemple : C:\mingw64\bin).
+
+Cliquez sur OK partout pour valider.
+
+Étape 4 : Tester dans VS Code
+Fermez complètement VS Code et rouvrez-le (pour qu'il prenne en compte la nouvelle configuration).
+
+Ouvrez votre projet dans VS Code, puis ouvrez le terminal intégré (assurez-vous qu'il est bien sur PowerShell ou Command Prompt).
+
+Tapez la commande suivante pour vérifier que gcc fonctionne enfin :
+
+PowerShell
+gcc --version
+(Si cela vous renvoie la version de GCC, c'est gagné !)
+
+Étape 5 : Compiler et lancer votre programme C
+Maintenant, pour compiler votre fichier (imaginons qu'il s'appelle code.c), tapez simplement :
+
+PowerShell
+gcc code.c -o mon_programme.exe
+Et pour l'exécuter :
+
+PowerShell
+.\mon_programme.exe
+Dites-moi si vous bloquez à l'une de ces étapes et on regarde ça ensemble !
