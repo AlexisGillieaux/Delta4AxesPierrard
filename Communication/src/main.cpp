@@ -9,6 +9,11 @@ int controle_driver=999;
 int ecrire_raspberry_flag=0;
 int free_drive_flag=0;
 String message_raspberry;
+String message_moteur1;
+String message_moteur2;
+String message_moteur3;
+String message_moteurRotation;
+String message_moteurPince;
 void menu();
 void ecrire_matrice();
 void driver();
@@ -106,7 +111,26 @@ void free_drive()
     Serial4.println();
     Serial5.println();
 }
-
+void controle_moteur1()
+{
+    Serial2.println(message_moteur1);
+}
+void controle_moteur2()
+{
+    Serial3.println(message_moteur2);
+}
+void controle_moteur3()
+{
+    Serial4.println(message_moteur3);
+}
+void moteur_rotation()
+{
+    Serial2.println(message_moteurRotation);
+}
+void moteur_pince()
+{
+    Serial2.println(message_moteurPince);
+}
 
 
 
