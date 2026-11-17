@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include <statemachine.h>
+
 
 constexpr unsigned long BAUD_RATE = 115200;
 int flag = 0;
@@ -113,22 +113,27 @@ void free_drive()
 }
 void controle_moteur1()
 {
+    message_moteur1 = "C0555528";
     Serial2.println(message_moteur1);
 }
 void controle_moteur2()
 {
+    message_moteur2 = "C0555528";
     Serial3.println(message_moteur2);
 }
 void controle_moteur3()
 {
+    message_moteur3 = "C0555528";
     Serial4.println(message_moteur3);
 }
 void moteur_rotation()
 {
+    message_moteurRotation = "C0555528";
     Serial2.println(message_moteurRotation);
 }
 void moteur_pince()
 {
+    message_moteurPince = "C0555528";
     Serial2.println(message_moteurPince);
 }
 
