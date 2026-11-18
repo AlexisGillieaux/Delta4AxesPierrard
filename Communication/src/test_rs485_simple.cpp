@@ -1,18 +1,19 @@
 /*
  * test_rs485_simple.cpp
  *
- * Test le plus simple possible de la liaison RS485 : le Teensy lit la température
- * du variateur A6-RS (trame de la FAQ StepperOnline) et l'affiche, une fois par
- * seconde. Aucune écriture dans le variateur.
+ * Test le plus simple possible du bus RS485 : le Teensy lit la température de
+ * chaque variateur A6-RS du bus (adresses listées dans ADRESSES) et l'affiche,
+ * une fois par seconde. Aucune écriture dans les variateurs.
  *
- *   Trame envoyée : 01 03 40 30 00 02 D1 C4
- *     01    = adresse du variateur (C0A.00)
+ *   Trame envoyée au variateur 1 : 01 03 40 30 00 02 D1 C4
+ *   Trame envoyée au variateur 2 : 02 03 40 30 00 02 D1 F7
+ *     01/02 = adresse du variateur (C0A.00), seul ce variateur répond
  *     03    = fonction Modbus "lecture"
  *     40 30 = premier registre lu : U40.30, température du module de puissance (IGBT)
  *     00 02 = 2 registres : U40.30 puis U40.31 (température du moteur)
- *     D1 C4 = CRC
+ *     xx xx = CRC (calculé par le programme, il dépend de l'adresse)
  *
- *   Réponse attendue (9 octets) : 01 03 04 [IGBT : 2 octets] [moteur : 2 octets] CRC CRC
+ *   Réponse attendue (9 octets) : [adresse] 03 04 [IGBT : 2 octets] [moteur : 2 octets] CRC CRC
  *     Chaque température est un entier signé en 0,1 °C (ex. 01 2C = 300 = 30,0 °C).
  *
  * Module : "TTL to RS485" bleu à MAX485, broches RO, RE, DE, DI / VCC, B, A, GND.
@@ -26,7 +27,14 @@
  *   Teensy broche 2       -> DE et RE (reliées ensemble)
  *   Teensy 3,3 V          -> VCC,   Teensy GND -> GND
  *   A -> RJ45 broche 4 (bleu)   B -> broche 5 (blanc-bleu)   GND -> broche 8 (marron)
+ *      branché dans CN3 du variateur 1
+ *   Variateur 1 CN4 -> variateur 2 CN3 : câble Ethernet droit (CN3 et CN4 sont reliés
+ *      en parallèle dans le variateur, les deux variateurs sont donc sur les mêmes fils)
  *   Pas de résistance de 120 ohms en plus : le module en a déjà une (R7).
+ *
+ * Réglages au panneau de chaque variateur (puis éteindre et rallumer le variateur) :
+ *   C0A.00 = son adresse (1, 2, ...), différente pour chaque variateur
+ *   C0A.01 = 7 (115200 bauds)   C0A.02 = 0
  *
  * Lancement : PlatformIO > PROJECT TASKS > test_rs485 > Upload and Monitor.
  */
@@ -35,9 +43,10 @@
 
 /* ============================ RÉGLAGES ============================ */
 
-constexpr uint32_t DEBIT = 115200;            // doit valoir C0A.01 du variateur (7 = 115200, 3 = 9600)
+const uint8_t ADRESSES[] = {1, 2};            // adresses des variateurs à interroger (C0A.00)
+constexpr uint32_t DEBIT = 115200;            // doit valoir C0A.01 des variateurs (7 = 115200, 3 = 9600)
 constexpr uint32_t ATTENTE_REPONSE_MS = 100;  // temps laissé au variateur pour répondre
-constexpr uint32_t PERIODE_MS = 1000;         // pause entre deux lectures
+constexpr uint32_t PERIODE_MS = 1000;         // pause entre deux tours de lecture
 constexpr uint8_t PIN_DE_RE = 2;              // DE et RE du MAX485, reliées ensemble
 
 HardwareSerialIMXRT &rs485 = Serial2;         // RX2 = broche 7, TX2 = broche 8
@@ -57,10 +66,16 @@ uint16_t crc16(const uint8_t *octets, size_t n)
     return crc;
 }
 
-void lireTemperature()
+void lireTemperature(uint8_t adresse)
 {
-    /* 1. Envoi de la trame de la FAQ */
-    const uint8_t trame[8] = {0x01, 0x03, 0x40, 0x30, 0x00, 0x02, 0xD1, 0xC4};
+    Serial.printf("--- Variateur %u ---\n", (unsigned)adresse);
+
+    /* 1. Envoi de la trame de lecture, avec l'adresse de ce variateur */
+    uint8_t trame[8] = {adresse, 0x03, 0x40, 0x30, 0x00, 0x02, 0, 0};
+    uint16_t crc = crc16(trame, 6);
+    trame[6] = (uint8_t)(crc & 0xFF);         // CRC : octet de poids faible en premier
+    trame[7] = (uint8_t)(crc >> 8);
+
     rs485.clear();                            // oublie ce qui traînait dans le tampon
     digitalWrite(PIN_DE_RE, HIGH);            // le Teensy prend la ligne
     rs485.write(trame, sizeof(trame));
@@ -92,29 +107,33 @@ void lireTemperature()
     }
     Serial.println(n > 32 ? " ..." : "");
 
-    /* 3. Recherche de la réponse attendue (01 03 04 + 4 octets + CRC valide),
+    /* 3. Recherche de la réponse attendue ([adresse] 03 04 + 4 octets + CRC valide),
           éventuellement précédée de parasites */
     for (size_t i = 0; i + 9 <= n; i++) {
         const uint8_t *r = recu + i;
         uint16_t crcRecu = (uint16_t)(r[7] | (r[8] << 8));
-        if (r[0] == 0x01 && r[1] == 0x03 && r[2] == 0x04 && crc16(r, 7) == crcRecu) {
+        if (r[0] == adresse && r[1] == 0x03 && r[2] == 0x04 && crc16(r, 7) == crcRecu) {
             int16_t igbt = (int16_t)((r[3] << 8) | r[4]);
             int16_t moteur = (int16_t)((r[5] << 8) | r[6]);
-            Serial.printf("RÉPONSE CORRECTE (après %u octet(s) parasite(s))\n", (unsigned)i);
-            Serial.printf("  Température du module de puissance (U40.30) : %.1f °C\n", igbt / 10.0);
-            Serial.printf("  Température du moteur (U40.31)              : %.1f °C\n\n", moteur / 10.0);
+            if (i > 0) {
+                Serial.printf("(réponse trouvée après %u octet(s) parasite(s))\n", (unsigned)i);
+            }
+            Serial.printf("  Module de puissance (U40.30) : %.1f °C\n", igbt / 10.0);
+            Serial.printf("  Moteur (U40.31)              : %.1f °C\n", moteur / 10.0);
             return;
         }
     }
 
     Serial.println("Pas de réponse valide.");
     if (total == 0) {
-        Serial.println("  Rien n'est revenu : vérifiez DE et RE reliés à la broche 2, A/B, la masse\n"
-                       "  commune (broche 8 du RJ45), puis au panneau du variateur : C0A.00 = 1,\n"
-                       "  C0A.01 = 7 si DEBIT vaut 115200 (3 pour 9600), C0A.02 = 0.\n");
+        Serial.printf("  Rien n'est revenu : au panneau de ce variateur, vérifiez C0A.00 = %u,\n"
+                      "  C0A.01 = 7 (115200) et C0A.02 = 0, puis éteint/rallumé. Si c'est le\n"
+                      "  variateur 2 : vérifiez le câble entre CN4 du variateur 1 et CN3 du variateur 2.\n",
+                      (unsigned)adresse);
     } else {
-        Serial.println("  Seulement des octets parasites : A et B inversés, masse non reliée, ou débit\n"
-                       "  différent de celui du variateur (C0A.01).\n");
+        Serial.println("  Seulement des octets parasites : deux variateurs avec la même adresse\n"
+                       "  (C0A.00) qui répondent en même temps, A et B inversés, masse non reliée,\n"
+                       "  ou débit différent (C0A.01).");
     }
 }
 
@@ -130,12 +149,15 @@ void setup()
     }
     delay(500);
     rs485.begin(DEBIT, SERIAL_8N1);           // 8 bits, sans parité, 1 bit de stop (C0A.02 = 0)
-    Serial.printf("\n=== Lecture de la température du variateur (Serial2, %lu bauds, DE/RE broche %u) ===\n",
+    Serial.printf("\n=== Lecture des températures des variateurs (Serial2, %lu bauds, DE/RE broche %u) ===\n",
                   (unsigned long)DEBIT, (unsigned)PIN_DE_RE);
 }
 
 void loop()
 {
-    lireTemperature();
+    for (uint8_t adresse : ADRESSES) {
+        lireTemperature(adresse);
+    }
+    Serial.println();
     delay(PERIODE_MS);
 }
