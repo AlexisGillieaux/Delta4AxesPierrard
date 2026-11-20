@@ -1,5 +1,8 @@
 #include <Arduino.h>
 #include <A6RS.h>
+#include <ctype.h>
+#include <errno.h>
+#include <stdlib.h>
 
 constexpr unsigned long BAUD_RATE = 115200;
 A6RS busMoteurs(Serial2, 2);  // DE/RE du MAX485 sur la broche 2
@@ -33,10 +36,106 @@ void setup()
     
 }
 
+bool lireEntier(const char *ligne, long &valeur)
+{
+    char *fin;
+    errno = 0;
+    valeur = strtol(ligne, &fin, 10);
+    if (fin == ligne || errno == ERANGE)
+    {
+        return false;
+    }
+    while (isspace(static_cast<unsigned char>(*fin)))
+    {
+        ++fin;
+    }
+    return *fin == '\0';
+}
+
 void loop() 
 {
     menu();
     driver();
+
+    static constexpr struct {
+        const char *invite;
+        long minimum;
+        long maximum;
+    } champs[] = {
+        {"Numero du moteur (adresse Modbus 1 a 247)", 1, 247},
+        {"Position absolue (en pas du variateur)", INT32_MIN, INT32_MAX},
+        {"Vitesse (1 a 8000 tr/min)", 1, 8000},
+        {"Acceleration (0 a 65535 ms)", 0, 65535},
+        {"Deceleration (0 a 65535 ms)", 0, 65535},
+    };
+    static long valeurs[sizeof(champs) / sizeof(champs[0])];
+    static size_t champ = 0;
+    static char ligne[80];
+    static size_t longueur = 0;
+    static bool ligneInvalide = false;
+    static bool afficherInvite = true;
+
+    if (!Serial)
+    {
+        champ = 0;
+        longueur = 0;
+        ligneInvalide = false;
+        afficherInvite = true;
+        return;
+    }
+    if (afficherInvite)
+    {
+        Serial.println(champs[champ].invite);
+        afficherInvite = false;
+    }
+
+    while (Serial.available() > 0)
+    {
+        const int caractere = Serial.read();
+        if (caractere != '\n' && caractere != '\r')
+        {
+            if (caractere > 0 && longueur < sizeof(ligne) - 1)
+            {
+                ligne[longueur++] = static_cast<char>(caractere);
+            }
+            else
+            {
+                ligneInvalide = true;
+            }
+            continue;
+        }
+        if (longueur == 0 && !ligneInvalide)
+        {
+            continue;
+        }
+
+        ligne[longueur] = '\0';
+        long valeur;
+        if (ligneInvalide || !lireEntier(ligne, valeur)
+            || valeur < champs[champ].minimum || valeur > champs[champ].maximum)
+        {
+            Serial.printf("Entrez un entier entre %ld et %ld, sans unite.\n",
+                          champs[champ].minimum, champs[champ].maximum);
+        }
+        else
+        {
+            valeurs[champ++] = valeur;
+        }
+        if (champ == sizeof(champs) / sizeof(champs[0]))
+        {
+            const bool declenche = busMoteurs.deplacerAbsolu(
+                static_cast<uint8_t>(valeurs[0]), static_cast<int32_t>(valeurs[1]),
+                static_cast<uint16_t>(valeurs[2]), static_cast<uint32_t>(valeurs[3]),
+                static_cast<uint32_t>(valeurs[4]));
+            Serial.println(declenche ? "Declenchement confirme."
+                                     : "Le variateur n'a pas confirme le declenchement.");
+            champ = 0;
+        }
+        longueur = 0;
+        ligneInvalide = false;
+        afficherInvite = true;
+        break;
+    }
 }
 
 void menu()
@@ -53,13 +152,6 @@ void menu()
         if (message == "FREE_DRIVE")
         {
             free_drive_flag=1;
-        }
-        if (message == "DEPLACER_ABSOLU" || message == "DEPLACER_ABSOLU\r")
-        {
-            if (!busMoteurs.deplacerAbsolu(1, 1000, 1000, 1000, 2000))
-            {
-                Serial.println("Le variateur 1 n'a pas confirme le declenchement.");
-            }
         }
     }
     if (ecrire_raspberry_flag == 1)
