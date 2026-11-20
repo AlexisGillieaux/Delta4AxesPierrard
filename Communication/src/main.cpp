@@ -1,7 +1,9 @@
 #include <Arduino.h>
+#include <A6RS.h>
 
 
 constexpr unsigned long BAUD_RATE = 115200;
+A6RS moteurs(Serial2, 2);  // MAX485 : DE et /RE reliés à la broche 2
 int flag = 0;
 int i = 0, j = 0;
 int matrice[5][9999] = {0};  // Déclaration de la matrice globale
@@ -9,11 +11,8 @@ int controle_driver=999;
 int ecrire_raspberry_flag=0;
 int free_drive_flag=0;
 String message_raspberry;
-String message_moteur1;
 String message_moteur2;
 String message_moteur3;
-String message_moteurRotation;
-String message_moteurPince;
 void menu();
 void ecrire_matrice();
 void driver();
@@ -24,7 +23,7 @@ void setup()
 {
     Serial.begin(BAUD_RATE);   // Moniteur USB pour le débogage
     Serial1.begin(BAUD_RATE);  // UART matériel : RX1 broche 0, TX1 broche 1
-    Serial2.begin(BAUD_RATE);  // UART matériel : RX2 broche 7, TX2 broche 8
+    moteurs.begin();          // RS-485 : RX2 broche 7, TX2 broche 8
     Serial3.begin(BAUD_RATE);  // UART matériel : RX3 broche 15, TX3 broche 14
     Serial4.begin(BAUD_RATE);  // UART matériel : RX4 broche 16, TX4 broche 17
     Serial5.begin(BAUD_RATE);  // UART matériel : RX5 broche 21, TX5 broche 20
@@ -106,15 +105,9 @@ void ecrireToRaspberry()
 }
 void free_drive()
 {
-    Serial2.println();
     Serial3.println();
     Serial4.println();
     Serial5.println();
-}
-void controle_moteur1()
-{
-    message_moteur1 = "C0555528";
-    Serial2.println(message_moteur1);
 }
 void controle_moteur2()
 {
@@ -125,16 +118,6 @@ void controle_moteur3()
 {
     message_moteur3 = "C0555528";
     Serial4.println(message_moteur3);
-}
-void moteur_rotation()
-{
-    message_moteurRotation = "C0555528";
-    Serial2.println(message_moteurRotation);
-}
-void moteur_pince()
-{
-    message_moteurPince = "C0555528";
-    Serial2.println(message_moteurPince);
 }
 
 
