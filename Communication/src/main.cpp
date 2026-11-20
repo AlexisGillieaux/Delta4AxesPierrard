@@ -1,8 +1,8 @@
 #include <Arduino.h>
-#include <A6RS.cpp>
-
+#include <A6RS.h>
 
 constexpr unsigned long BAUD_RATE = 115200;
+A6RS busMoteurs(Serial2, 2);  // DE/RE du MAX485 sur la broche 2
 int flag = 0;
 int i = 0, j = 0;
 int matrice[5][9999] = {0};  // Déclaration de la matrice globale
@@ -25,7 +25,7 @@ void setup()
 {
     Serial.begin(BAUD_RATE);   // Moniteur USB pour le débogage
     Serial1.begin(BAUD_RATE);  // UART matériel : RX1 broche 0, TX1 broche 1
-    Serial2.begin(BAUD_RATE);  // UART matériel : RX2 broche 7, TX2 broche 8
+    busMoteurs.begin(BAUD_RATE);
     Serial3.begin(BAUD_RATE);  // UART matériel : RX3 broche 15, TX3 broche 14
     Serial4.begin(BAUD_RATE);  // UART matériel : RX4 broche 16, TX4 broche 17
     Serial5.begin(BAUD_RATE);  // UART matériel : RX5 broche 21, TX5 broche 20
@@ -37,8 +37,6 @@ void loop()
 {
     menu();
     driver();
-    deplacerAbsolu(0, 1000, 1000, 1000, 1000, 2000);
-    
 }
 
 void menu()
@@ -55,6 +53,13 @@ void menu()
         if (message == "FREE_DRIVE")
         {
             free_drive_flag=1;
+        }
+        if (message == "DEPLACER_ABSOLU" || message == "DEPLACER_ABSOLU\r")
+        {
+            if (!busMoteurs.deplacerAbsolu(1, 1000, 1000, 1000, 2000))
+            {
+                Serial.println("Le variateur 1 n'a pas confirme le declenchement.");
+            }
         }
     }
     if (ecrire_raspberry_flag == 1)
@@ -112,28 +117,23 @@ void free_drive()
 }
 void controle_moteur1()
 {
-    message_moteur1 = "C0555528";
-    Serial2.println(message_moteur1);
+    
 }
 void controle_moteur2()
 {
-    message_moteur2 = "C0555528";
-    Serial3.println(message_moteur2);
+    
 }
 void controle_moteur3()
 {
-    message_moteur3 = "C0555528";
-    Serial4.println(message_moteur3);
+    
 }
 void moteur_rotation()
 {
-    message_moteurRotation = "C0555528";
-    Serial2.println(message_moteurRotation);
+    
 }
 void moteur_pince()
 {
-    message_moteurPince = "C0555528";
-    Serial2.println(message_moteurPince);
+
 }
 
 
