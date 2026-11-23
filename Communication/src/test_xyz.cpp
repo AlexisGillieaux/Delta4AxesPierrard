@@ -21,9 +21,11 @@
  * Les moteurs restent sous couple entre les commandes.
  *
  * Changement de mode : les mouvements J et L n'utilisent pas le même mode du variateur
- * (C11.00 = 3 ou 4), et ce paramètre ne se change que moteur coupé. Passer de J à L (ou
- * l'inverse) coupe donc le couple un court instant (le programme l'affiche). À résoudre
- * avant de monter les bras : ils retomberaient pendant cet instant.
+ * (C11.00 = 3 ou 4). Le manuel classe ce paramètre "At stop", sans dire si cela veut dire
+ * moteur coupé (S-OFF) ou simplement moteur à l'arrêt. Passer de J à L (ou l'inverse)
+ * ESSAIE donc d'abord de changer de mode sous couple, et affiche le résultat. Si un
+ * variateur refuse, le couple est coupé un court instant pour reconfigurer (le programme
+ * l'affiche) : à éviter avec les bras montés, ils retomberaient.
  *
  * Pour le robot final, la même chose se fera par Serial1 (Raspberry Pi) au lieu de
  * Serial (USB).
@@ -265,11 +267,48 @@ uint16_t registreSegment(size_t k)
     return (uint16_t)(0x1106 + 0x0A * k);
 }
 
-/* Vérifie les réglages faits au panneau (le variateur refuse qu'on modifie C0A.05 par
-   Modbus), coupe le moteur, puis le configure pour le mode demandé :
+/* Écrit les paramètres du mode demandé dans le variateur i, puis relit C11.00 et C11.01 :
    MODE_PP : un trapèze vers une position absolue (C11.00 = 3, C11.01 = 0) ;
    MODE_SEGMENTS : NB_SEGMENTS segments relatifs enchaînés (C11.00 = 4, C11.01 = 1).
-   Plusieurs paramètres ne s'écrivent que moteur coupé ("At stop" dans le manuel). */
+   C11.00 à C11.05 sont "At stop" dans le manuel : le variateur refuse peut-être de les
+   changer sous couple (S-ON). Retourne false si une écriture est refusée. */
+bool ecrireMode(size_t i, Mode mode)
+{
+    const uint8_t adresse = ADRESSES[i];
+    const uint16_t planification = (mode == MODE_PP) ? 3 : 4;
+    const uint16_t relatif = (mode == MODE_PP) ? 0 : 1;
+    if (!(ecrire16(adresse, 0x1100, planification)   // C11.00 : 3 = PP, 4 = segments enchaînés
+          && ecrire16(adresse, 0x1101, relatif))) {  // C11.01 : 0 = consigne ABSOLUE, 1 = RELATIVE
+        return false;
+    }
+    if (mode == MODE_SEGMENTS) {
+        if (!(ecrire16(adresse, 0x1103, 1)           // C11.03 = 1 : premier segment
+              && ecrire16(adresse, 0x1104, NB_SEGMENTS)  // C11.04 : dernier segment
+              && ecrire16(adresse, 0x1105, 1))) {    // C11.05 = 1 : chaque départ reprend au 1er segment
+            return false;
+        }
+        for (size_t k = 0; k < NB_SEGMENTS; k++) {
+            if (!(ecrire32(adresse, registreSegment(k) + 4, RAMPE_SEGMENT_MS)      // rampe d'accélération
+                  && ecrire32(adresse, registreSegment(k) + 6, RAMPE_SEGMENT_MS))) { // rampe de décélération
+                return false;
+            }
+        }
+    }
+    uint16_t lu1100 = 0;
+    uint16_t lu1101 = 0;
+    if (!(lire16(adresse, 0x1100, lu1100) && lire16(adresse, 0x1101, lu1101))) {
+        return false;
+    }
+    if (lu1100 != planification || lu1101 != relatif) {
+        Serial.printf("   Variateur %u : écriture acceptée mais relu C11.00 = %u, C11.01 = %u\n",
+                      adresse, lu1100, lu1101);
+        return false;
+    }
+    return true;
+}
+
+/* Vérifie les réglages faits au panneau (le variateur refuse qu'on modifie C0A.05 par
+   Modbus), coupe le moteur, puis le configure pour le mode demandé (voir ecrireMode). */
 bool configurer(size_t i, Mode mode)
 {
     const uint8_t adresse = ADRESSES[i];
@@ -295,32 +334,31 @@ bool configurer(size_t i, Mode mode)
           && lirePasParTour(i))) {
         return false;
     }
-    if (mode == MODE_PP) {
-        return ecrire16(adresse, 0x1100, 3)   // C11.00 = 3 : mode PP
-               && ecrire16(adresse, 0x1101, 0);  // C11.01 = 0 : consigne ABSOLUE
-    }
-    if (!(ecrire16(adresse, 0x1100, 4)        // C11.00 = 4 : segments enchaînés sans arrêt, une fois
-          && ecrire16(adresse, 0x1101, 1)     // C11.01 = 1 : déplacements RELATIFS
-          && ecrire16(adresse, 0x1103, 1)     // C11.03 = 1 : premier segment
-          && ecrire16(adresse, 0x1104, NB_SEGMENTS)  // C11.04 : dernier segment
-          && ecrire16(adresse, 0x1105, 1))) { // C11.05 = 1 : chaque départ reprend au 1er segment
-        return false;
-    }
-    for (size_t k = 0; k < NB_SEGMENTS; k++) {
-        if (!(ecrire32(adresse, registreSegment(k) + 4, RAMPE_SEGMENT_MS)      // rampe d'accélération
-              && ecrire32(adresse, registreSegment(k) + 6, RAMPE_SEGMENT_MS))) { // rampe de décélération
-            return false;
-        }
-    }
-    return true;
+    return ecrireMode(i, mode);
 }
 
 /* Moteurs sous couple, en marche et configurés pour le mode demandé. Si les variateurs
-   sont dans l'autre mode, ils sont reconfigurés : le couple est coupé un instant.
-   En cas d'échec après une mise sous couple, tous les moteurs sont coupés. */
+   sont dans l'autre mode, le programme essaie d'abord de changer de mode SOUS COUPLE ;
+   si un variateur refuse, ils sont reconfigurés moteur coupé : le couple est coupé un
+   instant. En cas d'échec après une mise sous couple, tous les moteurs sont coupés. */
 bool assurerMode(Mode mode)
 {
     uint16_t etat[NB_MOTEURS] = {};
+    if (sousCouple && modeActuel != AUCUN && modeActuel != mode) {
+        Serial.println("   ESSAI : changement de mode sans couper le couple (S-ON gardé)");
+        bool accepte = true;
+        for (size_t i = 0; i < NB_MOTEURS && accepte; i++) {
+            accepte = ecrireMode(i, mode);
+        }
+        if (accepte) {
+            modeActuel = mode;
+            Serial.println("   RÉSULTAT : changement de mode ACCEPTÉ SOUS COUPLE "
+                           "(le mouvement qui suit dira s'il est vraiment appliqué)");
+        } else {
+            Serial.println("   RÉSULTAT : changement de mode REFUSÉ sous couple");
+            modeActuel = AUCUN;               // état des variateurs incertain : tout réécrire
+        }
+    }
     if (sousCouple && modeActuel == mode) {
         if (tousEnMarche(etat)) {
             return true;
