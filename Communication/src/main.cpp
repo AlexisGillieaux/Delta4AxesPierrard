@@ -36,67 +36,52 @@ void setup()
     
 }
 
-bool lireEntier(const char *ligne, long &valeur)
+bool lireConsigneMoteur(const char *ligne, long (&valeurs)[5])
 {
-    char *fin;
-    errno = 0;
-    valeur = strtol(ligne, &fin, 10);
-    if (fin == ligne || errno == ERANGE)
+    for (long &valeur : valeurs)
     {
-        return false;
+        char *fin;
+        errno = 0;
+        valeur = strtol(ligne, &fin, 10);
+        if (fin == ligne || errno == ERANGE
+            || (*fin && !isspace(static_cast<unsigned char>(*fin))))
+        {
+            return false;
+        }
+        ligne = fin;
     }
-    while (isspace(static_cast<unsigned char>(*fin)))
+    while (isspace(static_cast<unsigned char>(*ligne)))
     {
-        ++fin;
+        ++ligne;
     }
-    return *fin == '\0';
+    return *ligne == '\0' && valeurs[0] >= 1 && valeurs[0] <= 247
+        && valeurs[1] >= INT32_MIN && valeurs[1] <= INT32_MAX
+        && valeurs[2] >= 1 && valeurs[2] <= 8000
+        && valeurs[3] >= 0 && valeurs[3] <= 65535
+        && valeurs[4] >= 0 && valeurs[4] <= 65535;
 }
 
-void loop() 
+void loop()
 {
     menu();
     driver();
+}
 
-    static constexpr struct {
-        const char *invite;
-        long minimum;
-        long maximum;
-    } champs[] = {
-        {"Numero du moteur (adresse Modbus 1 a 247)", 1, 247},
-        {"Position absolue (en pas du variateur)", INT32_MIN, INT32_MAX},
-        {"Vitesse (1 a 8000 tr/min)", 1, 8000},
-        {"Acceleration (0 a 65535 ms)", 0, 65535},
-        {"Deceleration (0 a 65535 ms)", 0, 65535},
-    };
-    static long valeurs[sizeof(champs) / sizeof(champs[0])];
-    static size_t champ = 0;
+void menu()
+{
+    static constexpr char commandeMoteur[] = "DEPLACER_ABSOLU ";
     static char ligne[80];
     static size_t longueur = 0;
     static bool ligneInvalide = false;
-    static bool afficherInvite = true;
 
-    if (!Serial)
+    while (Serial1.available() > 0)
     {
-        champ = 0;
-        longueur = 0;
-        ligneInvalide = false;
-        afficherInvite = true;
-        return;
-    }
-    if (afficherInvite)
-    {
-        Serial.println(champs[champ].invite);
-        afficherInvite = false;
-    }
-
-    while (Serial.available() > 0)
-    {
-        const int caractere = Serial.read();
-        if (caractere != '\n' && caractere != '\r')
+        const int octet = Serial1.read();
+        if (octet != '\n')
         {
-            if (caractere > 0 && longueur < sizeof(ligne) - 1)
+            if (octet > 0 && longueur < sizeof(ligne) - 1)
             {
-                ligne[longueur++] = static_cast<char>(caractere);
+                ligne[longueur++] = static_cast<char>(octet);
             }
             else
             {
@@ -104,62 +89,56 @@ void loop()
             }
             continue;
         }
-        if (longueur == 0 && !ligneInvalide)
-        {
-            continue;
-        }
 
+        if (longueur > 0 && ligne[longueur - 1] == '\r')
+        {
+            --longueur;
+        }
         ligne[longueur] = '\0';
-        long valeur;
-        if (ligneInvalide || !lireEntier(ligne, valeur)
-            || valeur < champs[champ].minimum || valeur > champs[champ].maximum)
-        {
-            Serial.printf("Entrez un entier entre %ld et %ld, sans unite.\n",
-                          champs[champ].minimum, champs[champ].maximum);
-        }
-        else
-        {
-            valeurs[champ++] = valeur;
-        }
-        if (champ == sizeof(champs) / sizeof(champs[0]))
-        {
-            const bool declenche = busMoteurs.deplacerAbsolu(
-                static_cast<uint8_t>(valeurs[0]), static_cast<int32_t>(valeurs[1]),
-                static_cast<uint16_t>(valeurs[2]), static_cast<uint32_t>(valeurs[3]),
-                static_cast<uint32_t>(valeurs[4]));
-            Serial.println(declenche ? "Declenchement confirme."
-                                     : "Le variateur n'a pas confirme le declenchement.");
-            champ = 0;
-        }
+        const bool invalide = ligneInvalide;
         longueur = 0;
         ligneInvalide = false;
-        afficherInvite = true;
-        break;
-    }
-}
 
-void menu()
-{
-   if (Serial1.available() > 0) 
-    {
-        String message = Serial1.readStringUntil('\n');
-        // int message2;
-        Serial.println(message);        // message.trim(); // Retire notamment le '\r' éventuel
-        if (message == "START_MATRIX")
+        if (invalide)
+        {
+            Serial1.println("ERR TRAME");
+        }
+        else if (strcmp(ligne, "START_MATRIX") == 0)
         {
             ecrire_matrice();
         }
-        if (message == "FREE_DRIVE")
+        else if (strcmp(ligne, "FREE_DRIVE") == 0)
         {
-            free_drive_flag=1;
+            free_drive_flag = 1;
         }
+        else if (strncmp(ligne, commandeMoteur, sizeof(commandeMoteur) - 1) == 0)
+        {
+            long valeurs[5];
+            if (!lireConsigneMoteur(ligne + sizeof(commandeMoteur) - 1, valeurs))
+            {
+                Serial1.println("ERR PARAMETRES");
+            }
+            else
+            {
+                const bool declenche = busMoteurs.deplacerAbsolu(
+                    static_cast<uint8_t>(valeurs[0]), static_cast<int32_t>(valeurs[1]),
+                    static_cast<uint16_t>(valeurs[2]), static_cast<uint32_t>(valeurs[3]),
+                    static_cast<uint32_t>(valeurs[4]));
+                Serial1.println(declenche ? "OK DECLENCHE" : "ERR VARIATEUR");
+            }
+        }
+        else if (*ligne)
+        {
+            Serial.println(ligne);
+        }
+        break;
     }
     if (ecrire_raspberry_flag == 1)
     {
         ecrireToRaspberry();
     }
- 
 }
+
 void driver()
 {
     if(free_drive_flag==1)
@@ -202,30 +181,6 @@ void ecrire_matrice()
 void ecrireToRaspberry()
 {
     Serial1.println(message_raspberry);
-}
-void free_drive()
-{
-
-}
-void controle_moteur1()
-{
-    
-}
-void controle_moteur2()
-{
-    
-}
-void controle_moteur3()
-{
-    
-}
-void moteur_rotation()
-{
-    
-}
-void moteur_pince()
-{
-
 }
 
 
