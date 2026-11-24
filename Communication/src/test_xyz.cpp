@@ -260,11 +260,12 @@ bool passeParZero(size_t i, int32_t depart, int32_t pos)
     return true;
 }
 
-/* Registre du déplacement du segment k (0 à 15) : C11.06 pour le 1er, puis 10 registres
-   par segment (déplacement +0, vitesse +2, rampe d'accélération +4, de décélération +6) */
+/* Registre du déplacement du segment k (0 à 15), tableau 8.13 du manuel : C11.06 pour le
+   1er, puis C11.10, C11.20... jusqu'à C11.F0 pour le 16e. À partir de ce registre :
+   vitesse +2, rampe d'accélération +4, rampe de décélération +6. */
 uint16_t registreSegment(size_t k)
 {
-    return (uint16_t)(0x1106 + 0x0A * k);
+    return (k == 0) ? 0x1106 : (uint16_t)(0x1100 + 0x10 * k);
 }
 
 /* Écrit les paramètres du mode demandé dans le variateur i, puis relit C11.00 et C11.01 :
@@ -745,6 +746,9 @@ bool commandeL(double dt, const double angle[NB_SEGMENTS][NB_MOTEURS])
         arrives = attendreArrivees(cible, depart_us, debutDernier, t0, NB_SEGMENTS * dureeSeg + 3000,
                                    arrivee);
     }
+    /* "Arrivé" = à moins de TOLERANCE_PAS : il reste quelques pas à faire. DI6 reste active
+       pendant ce temps, sinon le variateur les abandonnerait. */
+    delay(300);
     for (uint8_t adresse : ADRESSES) {
         ecrire16(adresse, 0x0415, 0);                // DI6 au repos, prête pour le départ suivant
     }

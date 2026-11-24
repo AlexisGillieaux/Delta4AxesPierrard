@@ -27,7 +27,8 @@
  * (false, ce que montre la figure 4-9 du manuel) ou de 0 à 1000 tr/min (true). Le
  * programme affiche la durée prévue dans les deux cas à côté de la durée mesurée.
  * Si c'est l'hypothèse true qui correspond, mettez RAMPE_JUSQUA_1000_RPM à true dans
- * test_synchro, test_articulaire, test_lineaire et test_xyz.
+ * test_synchro, test_articulaire et test_xyz, et RAMPE_SEGMENT_MS à 2500 dans
+ * test_lineaire et test_xyz (20 ms pour atteindre 8 tr/min).
  *
  * Réglages au panneau de chaque variateur (le reste est écrit par le programme) :
  *   C0A.00 = son adresse (1, 2), C0A.01 = 7 (115200), C0A.02 = 0, C0A.05 = 0, C0A.06 = 0,

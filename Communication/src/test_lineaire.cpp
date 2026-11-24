@@ -23,8 +23,9 @@
  * les phases 3 et 4 doivent donner le même mouvement.
  * Le test exécute les déplacements de cette trajectoire à partir de la position
  * actuelle des moteurs (pas besoin d'être à la position de départ).
- * Géométrie : les moteurs suivent une droite entre deux points du tableau. L'écart de
- * la plateforme à la vraie ligne droite reste sous 0,2 mm (vérifié avec DeltaForward).
+ * Géométrie (calculée avec DeltaForward, θ3 = θ2) : avec des vitesses parfaites, 16
+ * segments écartent la plateforme de 0,2 mm de la vraie ligne droite. Avec les tr/min
+ * entiers du plan affiché, l'écart prévu monte à 1,8 mm à l'aller et 6,4 mm au retour.
  *
  * Limites connues, que ce test doit mesurer :
  *   - vitesse en tr/min ENTIERS : un segment ne dure pas exactement DUREE_SEGMENT_MS.
@@ -281,11 +282,12 @@ bool passeParZero(size_t i, int32_t depart, int32_t pos)
     return true;
 }
 
-/* Registre du déplacement du segment k (0 à 15) : C11.06 pour le 1er, puis 10 registres
-   par segment (déplacement +0, vitesse +2, rampe d'accélération +4, de décélération +6) */
+/* Registre du déplacement du segment k (0 à 15), tableau 8.13 du manuel : C11.06 pour le
+   1er, puis C11.10, C11.20... jusqu'à C11.F0 pour le 16e. À partir de ce registre :
+   vitesse +2, rampe d'accélération +4, rampe de décélération +6. */
 uint16_t registreSegment(size_t k)
 {
-    return (uint16_t)(0x1106 + 0x0A * k);
+    return (k == 0) ? 0x1106 : (uint16_t)(0x1100 + 0x10 * k);
 }
 
 /* Vérifie les réglages faits au panneau (le variateur refuse qu'on modifie C0A.05 par
@@ -553,6 +555,9 @@ void bougerLineaire(bool retour)
             nbEchantillons++;
         }
     }
+    /* "Arrivé" = à moins de TOLERANCE_PAS : il reste quelques pas à faire. DI6 reste active
+       pendant ce temps, sinon le variateur les abandonnerait. */
+    delay(300);
     for (uint8_t adresse : ADRESSES) {
         ecrire16(adresse, 0x0415, 0);                  // DI6 au repos, prête pour le départ suivant
     }

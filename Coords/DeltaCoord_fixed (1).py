@@ -39,7 +39,10 @@ def solve_one_arm(xr, yr, z, wB, rP, L, l):
     """Résout pour un bras dont la direction est l'axe Y local
     Fonctionne avec des scalaires et arrays numpy. Retourne NaN si le point est hors de portée.
 
-    Si G = E, tan(θ/2) est infini : θ vaut ±180° ou NaN, hors de toute plage physique."""
+    tan(θ/2) = (-F - √disc) / (G - E). Sous la base (z < 0, donc F < 0), on calcule la forme
+    équivalente (G + E) / (√disc - F) : son dénominateur est toujours > 0, alors que la
+    première donne 0/0 (NaN) pour les poses atteignables où G = E.
+    Pour z >= 0, si G = E, θ vaut -180° ou NaN, hors de toute plage physique."""
     xr, yr, z = (np.asarray(v, dtype=float) for v in (xr, yr, z))
     a = wB - rP
     E = 2*L*(yr + a)
@@ -48,7 +51,8 @@ def solve_one_arm(xr, yr, z, wB, rP, L, l):
     disc = E**2 + F**2 - G**2
 
     with np.errstate(invalid="ignore", divide="ignore"):
-        t_minus = (-F - np.sqrt(disc)) / (G - E)
+        racine = np.sqrt(disc)
+        t_minus = np.where(F < 0, (G + E) / (racine - F), (-F - racine) / (G - E))
     t_minus = np.where(disc < 0, np.nan, t_minus)
     return np.degrees(2*np.arctan(t_minus))
 
